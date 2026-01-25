@@ -50,6 +50,19 @@ struct MetadataView: View {
                     InfoRow(label: "Format", value: book.fileType.uppercased())
                     InfoRow(label: "Paragraphs", value: "\(book.totalParagraphs ?? 0)")
                     InfoRow(label: "Added", value: formatDate(book.dateAdded))
+                    
+                    Divider()
+                    
+                    Text("Notes")
+                        .font(.headline)
+                    
+                    TextEditor(text: Binding(
+                        get: { book.notes ?? "" },
+                        set: { libraryManager.updateNotes(for: book, notes: $0) }
+                    ))
+                    .frame(height: 150)
+                    .border(Color.gray.opacity(0.2))
+                    .cornerRadius(8)
                 }
                 .padding()
             }

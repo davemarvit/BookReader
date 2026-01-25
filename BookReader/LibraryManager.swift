@@ -13,6 +13,7 @@ struct BookMetadata: Codable, Identifiable, Hashable {
     var lastReadDate: Date? // Date of last access
     var dateAdded: Date
     var fileType: String // "pdf", "epub", "txt"
+    var notes: String? // User notes
 }
 
 class LibraryManager: ObservableObject {
@@ -160,10 +161,18 @@ class LibraryManager: ObservableObject {
                 saveLibrary()
                 
                 // Force UI update
-                objectWillChange.send() 
+                objectWillChange.send()
             }
         } catch {
             print("Error saving cover image: \(error)")
+        }
+    }
+
+    func updateNotes(for book: BookMetadata, notes: String) {
+        if let idx = books.firstIndex(where: { $0.id == book.id }) {
+            books[idx].notes = notes
+            saveLibrary()
+            objectWillChange.send()
         }
     }
 }

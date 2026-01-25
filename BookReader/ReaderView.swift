@@ -12,6 +12,8 @@ struct ReaderView: View {
     // Scroll state
     @State private var isUserScrolling = false
     @State private var showingMetadata = false
+    // Prevent initial scroll layout from resetting position
+    @State private var isInitialLoad = true
     
     var body: some View {
         VStack(spacing: 0) {
@@ -37,6 +39,7 @@ struct ReaderView: View {
                                     index == audioController.currentParagraphIndex ? Color.yellow.opacity(0.3) : Color.clear
                                 )
                                 .cornerRadius(4)
+                                .textSelection(.enabled) // Enable Look Up, Copy, Share
                                 .id(index)
                                 .background( // Keep the geometry reader for scroll tracking
                                     GeometryReader { geo in
@@ -46,24 +49,28 @@ struct ReaderView: View {
                                         )
                                     }
                                 )
-                                .onTapGesture {
-                                    audioController.seek(to: Double(index) / Double(audioController.totalParagraphs))
-                                }
+
                         }
                     }
                     .padding()
                 }
                 .coordinateSpace(name: "ScrollView")
                 .onPreferenceChange(ViewOffsetKey.self) { offsets in
-                    // Sync only if session is NOT active (Paused)
-                    if isUserScrolling || !audioController.isSessionActive {
+                    // Prevent initial layout from resetting index to 0
+                    if isInitialLoad { return }
+                    
+                    // Sync ONLY if user is actively scrolling. 
+                    // We don't want layout changes or momentum from "snap" to overwrite our logical index.
+                    if isUserScrolling {
                         let sorted = offsets.map { (key: $0.key, val: $0.value) }.sorted { $0.val < $1.val }
                         
+                        // Find the top-most visible paragraph
                         if let topNode = sorted.first(where: { $0.val >= 0 }) {
                              let index = topNode.key
                              
                              if index != audioController.currentParagraphIndex {
-                                 // Double check strict conditions to prevent jumping
+                                 // Only update if we are not playing/session active (prevent fighting with auto-scroll)
+                                 // OR if we treat user scroll as "override"
                                  if !audioController.isSessionActive {
                                      audioController.restorePosition(index: index)
                                  }
@@ -81,7 +88,11 @@ struct ReaderView: View {
                     }
                 )
                 .onChange(of: audioController.currentParagraphIndex) { newIndex in
-                    // Save progress
+                    // Save progress ONLY if the controller is handling THIS book.
+                    // This prevents "zombie" views (previous book views still in memory) from overwriting
+                    // their book's progress when the controller loads a new book.
+                    guard audioController.currentBookID == bookID else { return }
+                    
                     libraryManager.updateProgress(for: bookID, index: newIndex)
                     
                     // Only auto-scroll if:
@@ -103,27 +114,29 @@ struct ReaderView: View {
                     }
                 }
                 .onAppear {
-                    // Load book if needed (AudioController handles deduplication)
-                    audioController.loadBook(text: document.text, bookID: bookID)
-                    
+                    // Load book with saved position
+                    // We fetch the book metadata to get the lastParagraphIndex
                     if let book = libraryManager.books.first(where: { $0.id == bookID }) {
-                        // Restore position ONLY if we just loaded (index is 0) or user explicit intent?
-                        // Actually, if we are opening the view, we probably want to resume where we left off,
-                        // UNLESS we are already playing that book (e.g. from Home screen play button).
+                        audioController.loadBook(text: document.text, bookID: bookID, initialIndex: book.lastParagraphIndex)
                         
-                        // If the controller is already playing/active with this book, don't force seek (it might cause skip).
-                        // But if it's paused or fresh, restore.
-                        if !audioController.isSessionActive || audioController.currentParagraphIndex == 0 {
+                        // If the book was already loaded, loadBook returns early.
+                        // We ensure visual sync:
+                        if audioController.currentBookID == bookID {
                              DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                 audioController.restorePosition(index: book.lastParagraphIndex)
-                                 proxy.scrollTo(book.lastParagraphIndex, anchor: .top)
-                             }
-                        } else {
-                            // Just scroll to current
-                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                 proxy.scrollTo(audioController.currentParagraphIndex, anchor: .top)
+                                 // If we are not playing, or if we just arrived, sync scroll
+                                 if !audioController.isSessionActive {
+                                     proxy.scrollTo(audioController.currentParagraphIndex, anchor: .top)
+                                 }
                              }
                         }
+                    } else {
+                        // Fallback
+                        audioController.loadBook(text: document.text, bookID: bookID)
+                    }
+                    
+                    // Disable initial load guard after layout settles
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        self.isInitialLoad = false
                     }
                 }
             }

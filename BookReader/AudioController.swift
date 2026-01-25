@@ -77,7 +77,7 @@ class AudioController: ObservableObject {
         }
     }
 
-    func loadBook(text: String, bookID: UUID) {
+    func loadBook(text: String, bookID: UUID, initialIndex: Int = 0) {
         if self.currentBookID == bookID && !self.paragraphs.isEmpty {
             return // Already loaded
         }
@@ -85,16 +85,16 @@ class AudioController: ObservableObject {
         self.currentBookID = bookID
         self.paragraphs = text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         self.totalParagraphs = self.paragraphs.count
-        self.currentParagraphIndex = 0
+        self.currentParagraphIndex = initialIndex
         self.isSessionActive = false // Reset
         self.audioCache.removeAll()
         self.player.replaceCurrentItem(with: nil)
         self.currentItemCancellable = nil
         
-        // Preload first few paragraphs
+        // Preload first few paragraphs starting from initialIndex
         Task {
-            await preloadAudio(for: 0)
-            await preloadAudio(for: 1)
+            await preloadAudio(for: initialIndex)
+            await preloadAudio(for: initialIndex + 1)
         }
     }
     

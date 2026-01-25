@@ -108,13 +108,9 @@ struct HomeView: View {
             self.selectedBook = book
             
             // Load and Play
-            audioController.loadBook(text: doc.text, bookID: book.id)
+            audioController.loadBook(text: doc.text, bookID: book.id, initialIndex: book.lastParagraphIndex)
             
-            // Restore position if needed (check if we are already at that point?)
-            // If loadBook had to load (was different book), index is 0.
-            // If it was same book, index remains.
-            // But we want to ensure we are at the saved 'lastParagraphIndex' if we are starting fresh session.
-            
+            // Ensure position is restored even if book was already loaded but paused at wrong spot
             if !audioController.isSessionActive {
                 audioController.restorePosition(index: book.lastParagraphIndex)
             }
