@@ -23,6 +23,7 @@ class AudioController: ObservableObject {
     private var activeTask: Task<Void, Never>?
     
     @Published var totalParagraphs: Int = 0
+    @Published var currentBookID: UUID?
     
     // Progress (0.0 to 1.0)
     var progress: Double {
@@ -49,27 +50,46 @@ class AudioController: ObservableObject {
         return String(format: "%.1f%%", progress * 100)
     }
 
-    private let player = AVQueuePlayer()
+    private let player = AVPlayer()
     private let ttsClient = GoogleTTSClient()
     
     // Cache for downloaded audio: [ParagraphIndex: URL]
     private var audioCache: [Int: URL] = [:]
+    
+    // Cancellables
     private var cancellables = Set<AnyCancellable>()
+    private var currentItemCancellable: AnyCancellable?
     
     init() {
+        setupAudioSession()
         // Observe player status to update UI
-        player.publisher(for: \.rate).sink { [weak self] rate in
+        player.publisher(for: \.rate).receive(on: DispatchQueue.main).sink { [weak self] rate in
             self?.isPlaying = rate > 0
         }.store(in: &cancellables)
     }
+    
+    private func setupAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, options: [])
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("Failed to set audio session category: \(error)")
+        }
+    }
 
-    func loadBook(text: String) {
+    func loadBook(text: String, bookID: UUID) {
+        if self.currentBookID == bookID && !self.paragraphs.isEmpty {
+            return // Already loaded
+        }
+        
+        self.currentBookID = bookID
         self.paragraphs = text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         self.totalParagraphs = self.paragraphs.count
         self.currentParagraphIndex = 0
         self.isSessionActive = false // Reset
         self.audioCache.removeAll()
-        self.player.removeAllItems()
+        self.player.replaceCurrentItem(with: nil)
+        self.currentItemCancellable = nil
         
         // Preload first few paragraphs
         Task {
@@ -82,18 +102,14 @@ class AudioController: ObservableObject {
         let newIndex = Int(Double(totalParagraphs) * percentage)
         let clampedIndex = min(max(newIndex, 0), totalParagraphs - 1)
         
-        if clampedIndex != currentParagraphIndex {
-            jumpToParagraph(at: clampedIndex)
-        }
+        // ALWAYS jump to allow restart/seek
+        jumpToParagraph(at: clampedIndex)
     }
     
     private func jumpToParagraph(at index: Int) {
         player.pause()
         currentParagraphIndex = index
-        isSessionActive = true // Treat seek as intent to play? Or just keep current state?
-        // User probably expects it to pause if it was paused? 
-        // Let's assume we maintain isSessionActive status OR auto-play.
-        // Usually seek implies play in this context.
+        isSessionActive = true 
         
         // Cancel previous loading task
         activeTask?.cancel()
@@ -133,30 +149,21 @@ class AudioController: ObservableObject {
     func pause() {
         isSessionActive = false
         player.pause()
+        activeTask?.cancel() // Cancel any pending loads so we don't auto-start
     }
     
     func skipForward() {
         let nextIndex = currentParagraphIndex + 1
         guard nextIndex < paragraphs.count else { return }
         
-        player.pause()
-        currentParagraphIndex = nextIndex
-        isSessionActive = true
-        Task {
-            await playParagraph(at: nextIndex)
-        }
+        jumpToParagraph(at: nextIndex)
     }
     
     func skipBackward() {
         let prevIndex = currentParagraphIndex - 1
         guard prevIndex >= 0 else { return }
         
-        player.pause()
-        currentParagraphIndex = prevIndex
-        isSessionActive = true
-        Task {
-            await playParagraph(at: prevIndex)
-        }
+        jumpToParagraph(at: prevIndex)
     }
     
     var paragraphs: [String] = []
@@ -176,6 +183,10 @@ class AudioController: ObservableObject {
         DispatchQueue.main.async {
             self.isLoading = true
             self.errorMessage = nil
+            // Ensure index is updated visually before loading starts if not already
+            if self.currentParagraphIndex != index {
+                self.currentParagraphIndex = index
+            }
         }
         
         do {
@@ -186,18 +197,24 @@ class AudioController: ObservableObject {
             
             let item = AVPlayerItem(url: url)
             
-            NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime, object: item)
+            // Explicitly manage the subscriber for the current item
+            // This replaces any previous subscriber, ensuring we don't have leaks or ghost callbacks
+            // WE MUST set this up BEFORE playing
+            let cancellable = NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime, object: item)
+                .receive(on: DispatchQueue.main)
                 .sink { [weak self] _ in
+                    print("Debug: Paragraph \(index) finished.")
                     self?.onParagraphFinished()
                 }
-                .store(in: &cancellables)
             
             DispatchQueue.main.async {
+                self.currentItemCancellable = cancellable
                 self.player.replaceCurrentItem(with: item)
                 self.player.rate = self.playbackRate
                 self.isLoading = false
             }
             
+            // Start preloading next
             await preloadAudio(for: index + 1)
             
         } catch {
@@ -212,9 +229,12 @@ class AudioController: ObservableObject {
     private func onParagraphFinished() {
         // Auto-advance
         let nextIndex = currentParagraphIndex + 1
+        print("Debug: Auto-advancing to \(nextIndex)")
+        
         if nextIndex < paragraphs.count {
             currentParagraphIndex = nextIndex
-            Task {
+            // Use activeTask to track this auto-advance
+            activeTask = Task {
                 await playParagraph(at: nextIndex)
             }
         } else {
@@ -222,6 +242,7 @@ class AudioController: ObservableObject {
                 self.player.pause()
                 self.isPlaying = false
                 self.isSessionActive = false
+                self.currentItemCancellable = nil
             }
         }
     }
@@ -242,7 +263,7 @@ class AudioController: ObservableObject {
         let data = try await ttsClient.fetchAudio(text: text, speed: 1.0) // We handle speed in player, so request 1x
         
         let tempDir = FileManager.default.temporaryDirectory
-        let fileURL = tempDir.appendingPathComponent("para_\(index).mp3")
+        let fileURL = tempDir.appendingPathComponent("para_\(currentBookID?.uuidString ?? "temp")_\(index).mp3")
         try data.write(to: fileURL)
         
         audioCache[index] = fileURL

@@ -24,9 +24,14 @@ enum TTSVoice: String, CaseIterable, Identifiable {
 
 class GoogleTTSClient: ObservableObject {
     private let baseURL = "https://texttospeech.googleapis.com/v1/text:synthesize"
+    private let settings = SettingsManager.shared
     
     func fetchAudio(text: String, voice: TTSVoice = .neural2Female, speed: Double = 1.0) async throws -> Data {
-        guard let url = URL(string: "\(baseURL)?key=\(Secrets.googleAPIKey)") else {
+        // Use Settings key, fallback to Secrets if empty
+        let apiKey = settings.googleAPIKey.isEmpty ? Secrets.googleAPIKey : settings.googleAPIKey
+        let voiceID = settings.selectedVoiceID
+        
+        guard let url = URL(string: "\(baseURL)?key=\(apiKey)") else {
             throw URLError(.badURL)
         }
         
@@ -34,7 +39,7 @@ class GoogleTTSClient: ObservableObject {
             "input": ["text": text],
             "voice": [
                 "languageCode": "en-US",
-                "name": voice.rawValue
+                "name": voiceID
             ],
             "audioConfig": [
                 "audioEncoding": "MP3",

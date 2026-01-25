@@ -5,6 +5,7 @@ import ZIPFoundation
 
 struct ParsedDocument {
     let title: String
+    let author: String?
     let text: String
     let paragraphCount: Int
     let coverImage: Data?
@@ -153,8 +154,10 @@ class DocumentParser {
         }
         
         let cleanedText = smartClean(fullText)
+
         let count = cleanedText.components(separatedBy: "\n\n").count
-        return ParsedDocument(title: title, text: cleanedText, paragraphCount: count, coverImage: coverData)
+        let author = pdf.documentAttributes?[PDFDocumentAttribute.authorAttribute] as? String
+        return ParsedDocument(title: title, author: author, text: cleanedText, paragraphCount: count, coverImage: coverData)
     }
     
      private static func parseEPUB(url: URL) -> ParsedDocument? {
@@ -194,6 +197,7 @@ class DocumentParser {
             }
             
             let title = findTagContent(in: opfContent, tag: "dc:title") ?? url.lastPathComponent
+            let author = findTagContent(in: opfContent, tag: "dc:creator")
             
             // 4. Extract Cover
             var coverData: Data? = nil
@@ -216,7 +220,7 @@ class DocumentParser {
             
             let cleanedText = smartClean(fullText)
             let count = cleanedText.components(separatedBy: "\n\n").count
-            return ParsedDocument(title: title, text: cleanedText, paragraphCount: count, coverImage: coverData)
+            return ParsedDocument(title: title, author: author, text: cleanedText, paragraphCount: count, coverImage: coverData)
             
         } catch {
             print("EPUB Error: \(error)")
@@ -230,7 +234,7 @@ class DocumentParser {
             let text = try String(contentsOf: url)
             let cleanedText = smartClean(text)
             let count = cleanedText.components(separatedBy: "\n\n").count
-            return ParsedDocument(title: url.lastPathComponent, text: cleanedText, paragraphCount: count, coverImage: nil)
+            return ParsedDocument(title: url.lastPathComponent, author: nil, text: cleanedText, paragraphCount: count, coverImage: nil)
         } catch {
             return nil
         }

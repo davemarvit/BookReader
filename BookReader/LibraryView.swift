@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct LibraryView: View {
     @ObservedObject var libraryManager: LibraryManager
+    @ObservedObject var settings = SettingsManager.shared
     @State private var isImporterPresented = false
     
     init(libraryManager: LibraryManager = LibraryManager()) {
@@ -12,10 +13,28 @@ struct LibraryView: View {
     @State private var navigateToReader = false
     @State private var loadedDocument: ParsedDocument?
     
+    var sortedBooks: [BookMetadata] {
+        switch settings.librarySortOption {
+        case "title":
+            return libraryManager.books.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+        case "author":
+            return libraryManager.books.sorted {
+                let a1 = $0.author ?? ""
+                let a2 = $1.author ?? ""
+                if a1.isEmpty && a2.isEmpty { return $0.title < $1.title }
+                if a1.isEmpty { return false } // No author goes last
+                if a2.isEmpty { return true }
+                return a1.localizedCaseInsensitiveCompare(a2) == .orderedAscending
+            }
+        default: // "recent"
+            return libraryManager.books.sorted { ($0.lastReadDate ?? $0.dateAdded) > ($1.lastReadDate ?? $1.dateAdded) }
+        }
+    }
+    
     var body: some View {
         NavigationView {
             List {
-                ForEach(libraryManager.books) { book in
+                ForEach(sortedBooks) { book in
                     Button(action: {
                         openBook(book)
                     }) {
@@ -53,13 +72,17 @@ struct LibraryView: View {
                                     .foregroundColor(.gray)
                             }
                             
-                            VStack(alignment: .leading) {
+                            VStack(alignment: .leading, spacing: 4) {
                                 Text(book.title)
                                     .font(.headline)
                                     .lineLimit(2)
-                                Text(book.fileType.uppercased())
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(.primary)
+                                
+                                if let author = book.author, !author.isEmpty {
+                                    Text(author)
+                                        .font(.subheadline)
+                                        .foregroundColor(.secondary)
+                                }
                             }
                             
                             Spacer()
@@ -95,6 +118,11 @@ struct LibraryView: View {
                 }) { EmptyView() }
             )
             .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink(destination: SettingsView()) {
+                        Image(systemName: "gear")
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { isImporterPresented = true }) {
                         Image(systemName: "plus")

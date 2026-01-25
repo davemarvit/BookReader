@@ -10,6 +10,7 @@ struct BookMetadata: Codable, Identifiable, Hashable {
     var coverFilename: String? // Relative to Documents/Books/
     var lastParagraphIndex: Int
     var totalParagraphs: Int? // Optional for backward compatibility
+    var lastReadDate: Date? // Date of last access
     var dateAdded: Date
     var fileType: String // "pdf", "epub", "txt"
 }
@@ -98,11 +99,12 @@ class LibraryManager: ObservableObject {
         let newBook = BookMetadata(
             id: UUID(),
             title: title,
-            author: nil,
+            author: tempDoc?.author,
             filename: filename,
             coverFilename: coverFilename,
             lastParagraphIndex: 0,
             totalParagraphs: tempDoc?.paragraphCount ?? 0,
+            lastReadDate: Date(),
             dateAdded: Date(),
             fileType: url.pathExtension.lowercased()
         )
@@ -134,11 +136,34 @@ class LibraryManager: ObservableObject {
     func updateProgress(for bookID: UUID, index: Int) {
         if let idx = books.firstIndex(where: { $0.id == bookID }) {
             books[idx].lastParagraphIndex = index
+            books[idx].lastReadDate = Date()
             saveLibrary()
         }
     }
     
     func getBookURL(for book: BookMetadata) -> URL {
         return booksDirectory.appendingPathComponent(book.filename)
+    }
+    
+    func updateCover(for book: BookMetadata, image: UIImage) {
+        guard let data = image.jpegData(compressionQuality: 0.8) else { return }
+        
+        let coverName = book.coverFilename ?? (UUID().uuidString + ".jpg")
+        let coverURL = booksDirectory.appendingPathComponent(coverName)
+        
+        do {
+            try data.write(to: coverURL)
+            
+            // Update metadata if filename was new
+            if let idx = books.firstIndex(where: { $0.id == book.id }) {
+                books[idx].coverFilename = coverName
+                saveLibrary()
+                
+                // Force UI update
+                objectWillChange.send() 
+            }
+        } catch {
+            print("Error saving cover image: \(error)")
+        }
     }
 }
