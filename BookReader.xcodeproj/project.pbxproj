@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		5577B0BD2F2615070031F12B /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 5577B0BC2F2615070031F12B /* ZIPFoundation */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		5577B0922F260B820031F12B /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -29,9 +33,22 @@
 		5577B09B2F260B820031F12B /* BookReaderUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BookReaderUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		5577B0C22F2623CA0031F12B /* Exceptions for "BookReader" folder in "BookReader" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5577B0832F260B7B0031F12B /* BookReader */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		5577B0862F260B7B0031F12B /* BookReader */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5577B0C22F2623CA0031F12B /* Exceptions for "BookReader" folder in "BookReader" target */,
+			);
 			path = BookReader;
 			sourceTree = "<group>";
 		};
@@ -52,6 +69,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5577B0BD2F2615070031F12B /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +96,7 @@
 				5577B0862F260B7B0031F12B /* BookReader */,
 				5577B0942F260B820031F12B /* BookReaderTests */,
 				5577B09E2F260B820031F12B /* BookReaderUITests */,
+				5577B0BB2F2615070031F12B /* Frameworks */,
 				5577B0852F260B7B0031F12B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,6 +109,13 @@
 				5577B09B2F260B820031F12B /* BookReaderUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		5577B0BB2F2615070031F12B /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -112,6 +138,7 @@
 			);
 			name = BookReader;
 			packageProductDependencies = (
+				5577B0BC2F2615070031F12B /* ZIPFoundation */,
 			);
 			productName = BookReader;
 			productReference = 5577B0842F260B7B0031F12B /* BookReader.app */;
@@ -195,6 +222,9 @@
 			);
 			mainGroup = 5577B07B2F260B7B0031F12B;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5577B0BA2F2613C50031F12B /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5577B0852F260B7B0031F12B /* Products */;
 			projectDirPath = "";
@@ -395,8 +425,10 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4H3MZNGDCC;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BookReader/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -422,8 +454,10 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4H3MZNGDCC;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = BookReader/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -550,6 +584,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		5577B0BA2F2613C50031F12B /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.20;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5577B0BC2F2615070031F12B /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5577B0BA2F2613C50031F12B /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 5577B07C2F260B7B0031F12B /* Project object */;
 }

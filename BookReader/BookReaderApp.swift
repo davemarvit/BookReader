@@ -1,17 +1,17 @@
-//
-//  BookReaderApp.swift
-//  BookReader
-//
-//  Created by Dave Marvit on 1/25/26.
-//
-
 import SwiftUI
 
 @main
 struct BookReaderApp: App {
+    // We need a shared LibraryManager to handle the import
+    @StateObject private var libraryManager = LibraryManager()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            LibraryView(libraryManager: libraryManager)
+                .onOpenURL { url in
+                    // Handle incoming file
+                    _ = libraryManager.importBook(from: url)
+                }
         }
     }
 }
