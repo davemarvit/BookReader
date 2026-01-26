@@ -4,10 +4,7 @@ struct HomeView: View {
     @ObservedObject var libraryManager: LibraryManager
     @EnvironmentObject var audioController: AudioController
     
-    @State private var navigateToLibrary = false
-    @State private var navigateToReader = false
-    @State private var selectedBook: BookMetadata?
-    @State private var loadedDocument: ParsedDocument?
+    @State private var navigationPath: [NavigationDestination] = []
     
     var lastReadBook: BookMetadata? {
         // Sort by lastReadDate (descending), fallback to dateAdded
@@ -17,7 +14,7 @@ struct HomeView: View {
     }
     
     var body: some View {
-        NavigationView {
+        NavigationStack(path: $navigationPath) {
             ZStack {
                 // Background Image
                 Image("WakeUpImage")
@@ -35,26 +32,33 @@ struct HomeView: View {
                     Spacer().frame(height: 60)
                     
                     if let book = lastReadBook {
-                        VStack(spacing: 8) {
-                            Text("Continue Reading")
-                                .font(.subheadline)
-                                .textCase(.uppercase)
-                                .tracking(2)
-                                .foregroundColor(.white.opacity(0.8))
-                            
-                            Text(book.title)
-                                .font(.title)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal)
+                        // Book Title & Info (Clickable to Open Reader)
+                        Button(action: {
+                            openReader(book)
+                        }) {
+                            VStack(spacing: 8) {
+                                Text("Continue Reading")
+                                    .font(.subheadline)
+                                    .textCase(.uppercase)
+                                    .tracking(2)
+                                    .foregroundColor(.white.opacity(0.8))
+                                
+                                Text(book.title)
+                                    .font(.title)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                                    .multilineTextAlignment(.center)
+                                    .fixedSize(horizontal: false, vertical: true) // Allow unlimited height for text
+                                    .padding(.horizontal)
+                            }
                         }
                         .padding(.bottom, 40)
                         
+                        // Play/Pause Button (Toggles Audio)
                         Button(action: {
-                            playBook(book)
+                            togglePlayback(for: book)
                         }) {
-                            Image(systemName: "play.circle.fill")
+                            Image(systemName: playbackIconName(for: book))
                                 .resizable()
                                 .frame(width: 80, height: 80)
                                 .foregroundColor(.white)
@@ -69,7 +73,7 @@ struct HomeView: View {
                     Spacer()
                     
                     Button(action: {
-                        navigateToLibrary = true
+                        navigationPath = [.library]
                     }) {
                         Text("My Library")
                             .font(.headline)
@@ -85,39 +89,88 @@ struct HomeView: View {
                     }
                     .padding(.bottom, 50)
                 }
-                
-                // Navigation Links
-                NavigationLink(isActive: $navigateToLibrary, destination: {
-                    LibraryView(libraryManager: libraryManager)
-                }) { EmptyView() }
-                
-                NavigationLink(isActive: $navigateToReader, destination: {
-                    if let doc = loadedDocument, let book = selectedBook {
-                        ReaderView(document: doc, bookID: book.id, libraryManager: libraryManager)
-                    }
-                }) { EmptyView() }
+            }
+            .navigationDestination(for: NavigationDestination.self) { destination in
+                 switch destination {
+                 case .library:
+                     LibraryView(libraryManager: libraryManager, navigationPath: $navigationPath)
+                         .navigationBarBackButtonHidden(false)
+                 case .reader(let doc, let book):
+                     ReaderView(
+                         document: doc,
+                         bookID: book.id,
+                         libraryManager: libraryManager,
+                         onClose: {
+                             // Pop to Home
+                             navigationPath = []
+                         },
+                         onOpenLibrary: {
+                             // Swap to Library (Atomic)
+                             navigationPath = [.library]
+                         }
+                     )
+                 }
             }
         }
-        .navigationViewStyle(StackNavigationViewStyle())
     }
     
-    func playBook(_ book: BookMetadata) {
+    func playbackIconName(for book: BookMetadata) -> String {
+        if audioController.isPlaying && audioController.currentBookID == book.id {
+            return "pause.circle.fill"
+        } else {
+            return "play.circle.fill"
+        }
+    }
+    
+    func togglePlayback(for book: BookMetadata) {
+        if audioController.currentBookID == book.id {
+            // Same book: Toggle
+            if audioController.isPlaying {
+                audioController.pause()
+            } else {
+                audioController.play()
+            }
+        } else {
+            // Different book: Load and Play
+            loadBook(book)
+            audioController.play()
+        }
+    }
+    
+    func openReader(_ book: BookMetadata) {
+        if audioController.currentBookID != book.id {
+            // Load logic is now integrated, or we can prep it first
+            if let doc = loadDocument(for: book) {
+                audioController.loadBook(text: doc.text, bookID: book.id, initialIndex: book.lastParagraphIndex)
+                if !audioController.isSessionActive {
+                    audioController.restorePosition(index: book.lastParagraphIndex)
+                }
+                self.navigationPath = [.reader(doc, book)]
+            }
+        } else {
+             // Already loaded? Re-parse logic might be needed if we don't persist 'doc'
+             // Ideally we shouldn't re-parse if unnecessary.
+             if let doc = loadDocument(for: book) {
+                 self.navigationPath = [.reader(doc, book)]
+             }
+        }
+    }
+    
+    func loadDocument(for book: BookMetadata) -> ParsedDocument? {
+        let url = libraryManager.getBookURL(for: book)
+        return DocumentParser.parse(url: url)
+    }
+    
+    func loadBook(_ book: BookMetadata) {
         let url = libraryManager.getBookURL(for: book)
         if let doc = DocumentParser.parse(url: url) {
-            self.loadedDocument = doc
-            self.selectedBook = book
-            
-            // Load and Play
+            // self.loadedDocument = doc // No longer needed for navigation, but doc is needed for audio
+            // self.selectedBook = book // Removed as state is now managed via NavigationDestination
             audioController.loadBook(text: doc.text, bookID: book.id, initialIndex: book.lastParagraphIndex)
             
-            // Ensure position is restored even if book was already loaded but paused at wrong spot
             if !audioController.isSessionActive {
                 audioController.restorePosition(index: book.lastParagraphIndex)
             }
-            // For now, reload to be safe.
-            
-            audioController.play()
-            self.navigateToReader = true
         }
     }
 }

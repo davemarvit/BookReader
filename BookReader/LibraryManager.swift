@@ -168,6 +168,22 @@ class LibraryManager: ObservableObject {
         }
     }
 
+    func updateTitle(for book: BookMetadata, title: String) {
+        if let idx = books.firstIndex(where: { $0.id == book.id }) {
+            books[idx].title = title
+            saveLibrary()
+            objectWillChange.send()
+        }
+    }
+    
+    func updateAuthor(for book: BookMetadata, author: String) {
+        if let idx = books.firstIndex(where: { $0.id == book.id }) {
+            books[idx].author = author
+            saveLibrary()
+            objectWillChange.send()
+        }
+    }
+    
     func updateNotes(for book: BookMetadata, notes: String) {
         if let idx = books.firstIndex(where: { $0.id == book.id }) {
             books[idx].notes = notes

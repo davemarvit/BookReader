@@ -6,12 +6,13 @@ struct LibraryView: View {
     @ObservedObject var settings = SettingsManager.shared
     @State private var isImporterPresented = false
     
-    init(libraryManager: LibraryManager = LibraryManager()) {
+    // Shared Navigation Path
+    @Binding var navigationPath: [NavigationDestination]
+    
+    init(libraryManager: LibraryManager = LibraryManager(), navigationPath: Binding<[NavigationDestination]> = .constant([])) {
         self.libraryManager = libraryManager
+        self._navigationPath = navigationPath
     }
-    @State private var selectedBook: BookMetadata?
-    @State private var navigateToReader = false
-    @State private var loadedDocument: ParsedDocument?
     
     var sortedBooks: [BookMetadata] {
         switch settings.librarySortOption {
@@ -32,91 +33,21 @@ struct LibraryView: View {
     }
     
     var body: some View {
-        NavigationView {
-            List {
-                ForEach(sortedBooks) { book in
-                    Button(action: {
-                        openBook(book)
-                    }) {
-                        HStack {
-                            // Cover Image
-                            // Cover Image
-                            if let coverURL = libraryManager.getCoverURL(for: book) {
-                                AsyncImage(url: coverURL) { phase in
-                                    switch phase {
-                                    case .empty:
-                                        ProgressView()
-                                            .frame(width: 50, height: 75)
-                                    case .success(let image):
-                                        image
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fill)
-                                            .frame(width: 50, height: 75)
-                                            .cornerRadius(4)
-                                            .clipped()
-                                    case .failure:
-                                        Image(systemName: "text.book.closed.fill")
-                                            .resizable()
-                                            .aspectRatio(contentMode: .fit)
-                                            .frame(width: 50, height: 75)
-                                            .foregroundColor(.gray)
-                                    @unknown default:
-                                        EmptyView()
-                                    }
-                                }
-                            } else {
-                                Image(systemName: "text.book.closed.fill")
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(width: 50, height: 75)
-                                    .foregroundColor(.gray)
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(book.title)
-                                    .font(.headline)
-                                    .lineLimit(2)
-                                    .foregroundColor(.primary)
-                                
-                                if let author = book.author, !author.isEmpty {
-                                    Text(author)
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            Spacer()
-                            
-                            // Progress Circle
-                            ZStack {
-                                Circle()
-                                    .stroke(lineWidth: 4)
-                                    .opacity(0.3)
-                                    .foregroundColor(.blue)
-                                
-                                Circle()
-                                    .trim(from: 0.0, to: CGFloat(min(Double(book.lastParagraphIndex) / Double(max(book.totalParagraphs ?? 1, 1)), 1.0)))
-                                    .stroke(style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
-                                    .foregroundColor(.blue)
-                                    .rotationEffect(Angle(degrees: 270.0))
-                            }
-                            .frame(width: 30, height: 30)
-                            .padding(.trailing, 8)
-                        }
+        // NavigationView removed to prevent nesting loops with HomeView
+        List {
+            ForEach(sortedBooks) { book in
+                Button(action: {
+                    openBook(book)
+                }) {
+                        BookRow(book: book, libraryManager: libraryManager)
                     }
                 }
                 .onDelete(perform: libraryManager.deleteBook)
             }
             .navigationTitle("My Library")
             
-            // Hidden navigation link
-            .background(
-                NavigationLink(isActive: $navigateToReader, destination: {
-                    if let doc = loadedDocument, let book = selectedBook {
-                        ReaderView(document: doc, bookID: book.id, libraryManager: libraryManager)
-                    }
-                }) { EmptyView() }
-            )
+            // Hidden navigation link mechanism REMOVED in favor of shared path
+            
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink(destination: SettingsView()) {
@@ -134,24 +65,110 @@ struct LibraryView: View {
                 allowedContentTypes: [UTType.pdf, UTType.plainText, UTType.epub, UTType(filenameExtension: "epub")!],
                 allowsMultipleSelection: true
             ) { result in
-                switch result {
-                case .success(let urls):
-                    for url in urls {
-                        _ = libraryManager.importBook(from: url)
-                    }
-                case .failure(let error):
-                    print("Import failed: \(error.localizedDescription)")
-                }
+                handleImport(result: result)
             }
         }
-    }
     
     func openBook(_ book: BookMetadata) {
         let url = libraryManager.getBookURL(for: book)
+        // Ensure we load asynchronously if needed, but for now simple checks
         if let doc = DocumentParser.parse(url: url) {
-            self.loadedDocument = doc
-            self.selectedBook = book
-            self.navigateToReader = true
+            // Append to shared path -> Triggers HomeView's navigationDestination
+            self.navigationPath.append(.reader(doc, book))
+        }
+    }
+    
+    func handleImport(result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            for url in urls {
+                // Task for async work
+                Task {
+                    await libraryManager.importBook(from: url)
+                }
+            }
+        case .failure(let error):
+            print("Import failed: \(error.localizedDescription)")
+        }
+    }
+}
+
+// Extracted Subview to help compiler
+struct BookRow: View {
+    let book: BookMetadata
+    @ObservedObject var libraryManager: LibraryManager
+    
+    var body: some View {
+        HStack {
+            // Cover Image
+            if let coverURL = libraryManager.getCoverURL(for: book) {
+                AsyncImage(url: coverURL) { phase in
+                    switch phase {
+                    case .empty:
+                        ProgressView().frame(width: 50, height: 75)
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fill).frame(width: 50, height: 75).cornerRadius(4).clipped()
+                    case .failure:
+                        fallbackCover
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+            } else {
+                fallbackCover
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(book.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .foregroundColor(.primary)
+                
+                if let author = book.author, !author.isEmpty {
+                    Text(author)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            
+            Spacer()
+            
+            ProgressRing(progress: progress(for: book))
+                .frame(width: 30, height: 30)
+                .padding(.trailing, 8)
+        }
+    }
+    
+    var fallbackCover: some View {
+        Image(systemName: "text.book.closed.fill")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 50, height: 75)
+            .foregroundColor(.gray)
+    }
+    
+    func progress(for book: BookMetadata) -> CGFloat {
+        let total = Double(max(book.totalParagraphs ?? 1, 1))
+        let current = Double(book.lastParagraphIndex)
+        return CGFloat(min(current / total, 1.0))
+    }
+}
+
+struct ProgressRing: View {
+    let progress: CGFloat
+    
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(lineWidth: 4)
+                .opacity(0.3)
+                .foregroundColor(.blue)
+            
+            Circle()
+                .trim(from: 0.0, to: progress)
+                .stroke(style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+                .foregroundColor(.blue)
+                .rotationEffect(Angle(degrees: 270.0))
         }
     }
 }

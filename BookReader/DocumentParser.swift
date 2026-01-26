@@ -3,12 +3,28 @@ import PDFKit
 import UniformTypeIdentifiers
 import ZIPFoundation
 
-struct ParsedDocument {
+struct ParsedDocument: Hashable {
     let title: String
     let author: String?
     let text: String
     let paragraphCount: Int
     let coverImage: Data?
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(title)
+        hasher.combine(author)
+        hasher.combine(paragraphCount)
+        // Skip large text/image for performance hashing, rely on title + count usually being unique enough for momentary state
+        // or combine prefix of text
+        hasher.combine(text.prefix(100))
+    }
+    
+    static func == (lhs: ParsedDocument, rhs: ParsedDocument) -> Bool {
+        return lhs.title == rhs.title &&
+               lhs.author == rhs.author &&
+               lhs.paragraphCount == rhs.paragraphCount &&
+               lhs.text == rhs.text // Equality must still check full text if hash collides
+    }
 }
 
 class DocumentParser {
