@@ -149,8 +149,8 @@ struct EditableInfoRow: View {
     @Binding var text: String
     
     var body: some View {
-        VStack(alignment: .leading) {
-            Text(label).font(.caption).foregroundColor(.secondary)
+        HStack {
+            Text(label + ":").foregroundColor(.secondary)
             TextField(label, text: $text)
                 .textFieldStyle(RoundedBorderTextFieldStyle())
         }

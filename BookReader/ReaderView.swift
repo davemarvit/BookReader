@@ -189,7 +189,14 @@ struct ReaderTextView: View {
             }
             .onAppear {
                 if let book = libraryManager.books.first(where: { $0.id == bookID }) {
-                     audioController.loadBook(text: document.text, bookID: bookID, initialIndex: book.lastParagraphIndex)
+                     // Fetch Cover
+                     var coverImage: UIImage? = nil
+                     if let coverURL = libraryManager.getCoverURL(for: book),
+                        let data = try? Data(contentsOf: coverURL) {
+                         coverImage = UIImage(data: data)
+                     }
+                     
+                     audioController.loadBook(text: document.text, bookID: bookID, title: book.title, cover: coverImage, initialIndex: book.lastParagraphIndex)
                      
                      if audioController.currentBookID == bookID {
                           // Increased delay to ensure Layout is ready for scrollTo
@@ -205,7 +212,7 @@ struct ReaderTextView: View {
                           }
                      }
                 } else {
-                     audioController.loadBook(text: document.text, bookID: bookID)
+                     audioController.loadBook(text: document.text, bookID: bookID, title: document.title, cover: nil)
                 }
                 
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {

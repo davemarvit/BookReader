@@ -159,16 +159,42 @@ struct ProgressRing: View {
     
     var body: some View {
         ZStack {
+            // Background circle outline
             Circle()
-                .stroke(lineWidth: 4)
+                .stroke(lineWidth: 1)
                 .opacity(0.3)
                 .foregroundColor(.blue)
             
-            Circle()
-                .trim(from: 0.0, to: progress)
-                .stroke(style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
-                .foregroundColor(.blue)
-                .rotationEffect(Angle(degrees: 270.0))
+            // Filled slice representing progress
+            if progress > 0 {
+                PieSlice(startAngle: .degrees(-90), endAngle: .degrees(-90 + Double(progress) * 360))
+                    .foregroundColor(.blue)
+            }
         }
+    }
+}
+
+struct PieSlice: Shape {
+    var startAngle: Angle
+    var endAngle: Angle
+
+    var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(startAngle.radians, endAngle.radians) }
+        set {
+            startAngle = Angle(radians: newValue.first)
+            endAngle = Angle(radians: newValue.second)
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let radius = min(rect.width, rect.height) / 2
+        
+        path.move(to: center)
+        path.addArc(center: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: false)
+        path.closeSubpath()
+        
+        return path
     }
 }

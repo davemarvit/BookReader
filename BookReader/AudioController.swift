@@ -42,6 +42,8 @@ class AudioController: NSObject, ObservableObject {
 
     @Published var totalParagraphs: Int = 0
     @Published var currentBookID: UUID?
+    @Published var bookTitle: String = ""
+    @Published var coverImage: UIImage?
     
     // Progress (0.0 to 1.0)
     var progress: Double {
@@ -169,7 +171,7 @@ class AudioController: NSObject, ObservableObject {
     
     // MARK: - Playback Logic
     
-    func loadBook(text: String, bookID: UUID, initialIndex: Int = 0) {
+    func loadBook(text: String, bookID: UUID, title: String, cover: UIImage?, initialIndex: Int = 0) {
         if self.currentBookID == bookID && !self.paragraphs.isEmpty {
             return
         }
@@ -177,6 +179,8 @@ class AudioController: NSObject, ObservableObject {
         self.stopEverything()
         
         self.currentBookID = bookID
+        self.bookTitle = title
+        self.coverImage = cover
         self.paragraphs = text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         self.totalParagraphs = self.paragraphs.count
         self.currentParagraphIndex = initialIndex
@@ -506,25 +510,45 @@ class AudioController: NSObject, ObservableObject {
     private func updateNowPlayingInfo(playbackRate: Double? = nil) {
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [String: Any]()
         
-        let title = "Paragraph \(currentParagraphIndex + 1)" // Or book title if available?
-        // We lack Book Title in AudioController. User passed it in 'loadBook' metadata? 
-        // We only have UUID. We could store the title string in loadBook?
-        // defaulting to generic for now.
+        // Title & Artist
+        info[MPMediaItemPropertyTitle] = bookTitle.isEmpty ? "Book Reader" : bookTitle
+        info[MPMediaItemPropertyArtist] = "Book Reader"
         
-        info[MPMediaItemPropertyTitle] = title
-        info[MPMediaItemPropertyArtist] = "BookReader"
-        
-        // Duration - Try to get from item
-        if isGoogleMode, let item = player.currentItem {
-            info[MPMediaItemPropertyPlaybackDuration] = item.duration.seconds
-            info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = item.currentTime().seconds
+        // Artwork
+        if let cover = coverImage {
+            info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: cover.size) { _ in return cover }
         }
+        
+        // Duration & Progress (Estimated)
+        // We use estimation because actual audio duration varies per paragraph.
+        let totalDuration = estimatedTotalDuration
+        let elapsed = estimatedElapsedDuration
+        
+        info[MPMediaItemPropertyPlaybackDuration] = totalDuration
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = elapsed
         
         if let rate = playbackRate {
             info[MPNowPlayingInfoPropertyPlaybackRate] = rate
         }
         
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+    
+    // MARK: - Duration Estimation
+    
+    var estimatedTotalDuration: Double {
+        // Estimate based on 15 chars per second (average reading speed)
+        let totalChars = paragraphs.reduce(0) { $0 + $1.count }
+        let baseSeconds = Double(totalChars) / 15.0
+        // We do NOT adjust by playbackRate here for the *Duration* field in MPInfo,
+        // because MPInfo handles rate scaling visually if we provide the base duration and set the rate.
+        return baseSeconds
+    }
+    
+    var estimatedElapsedDuration: Double {
+        guard currentParagraphIndex < paragraphs.count else { return estimatedTotalDuration }
+        let passedChars = paragraphs.prefix(currentParagraphIndex).reduce(0) { $0 + $1.count }
+        return Double(passedChars) / 15.0
     }
     
     // MARK: - Helpers

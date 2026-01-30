@@ -141,7 +141,13 @@ struct HomeView: View {
         if audioController.currentBookID != book.id {
             // Load logic is now integrated, or we can prep it first
             if let doc = loadDocument(for: book) {
-                audioController.loadBook(text: doc.text, bookID: book.id, initialIndex: book.lastParagraphIndex)
+                // Fetch Cover
+                var coverImage: UIImage? = nil
+                if let coverURL = libraryManager.getCoverURL(for: book),
+                   let data = try? Data(contentsOf: coverURL) {
+                    coverImage = UIImage(data: data)
+                }
+                audioController.loadBook(text: doc.text, bookID: book.id, title: book.title, cover: coverImage, initialIndex: book.lastParagraphIndex)
                 if !audioController.isSessionActive {
                     audioController.restorePosition(index: book.lastParagraphIndex)
                 }
@@ -166,7 +172,15 @@ struct HomeView: View {
         if let doc = DocumentParser.parse(url: url) {
             // self.loadedDocument = doc // No longer needed for navigation, but doc is needed for audio
             // self.selectedBook = book // Removed as state is now managed via NavigationDestination
-            audioController.loadBook(text: doc.text, bookID: book.id, initialIndex: book.lastParagraphIndex)
+            
+            // Fetch Cover
+            var coverImage: UIImage? = nil
+            if let coverURL = libraryManager.getCoverURL(for: book),
+               let data = try? Data(contentsOf: coverURL) {
+                coverImage = UIImage(data: data)
+            }
+            
+            audioController.loadBook(text: doc.text, bookID: book.id, title: book.title, cover: coverImage, initialIndex: book.lastParagraphIndex)
             
             if !audioController.isSessionActive {
                 audioController.restorePosition(index: book.lastParagraphIndex)
