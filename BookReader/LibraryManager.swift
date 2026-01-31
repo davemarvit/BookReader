@@ -168,6 +168,23 @@ class LibraryManager: ObservableObject {
         }
     }
 
+    func deleteCover(for book: BookMetadata) {
+        guard let filename = book.coverFilename else { return }
+        let coverURL = booksDirectory.appendingPathComponent(filename)
+        
+        do {
+            try fileManager.removeItem(at: coverURL)
+            
+            if let idx = books.firstIndex(where: { $0.id == book.id }) {
+                books[idx].coverFilename = nil
+                saveLibrary()
+                objectWillChange.send()
+            }
+        } catch {
+            print("Error deleting cover: \(error)")
+        }
+    }
+
     func updateTitle(for book: BookMetadata, title: String) {
         if let idx = books.firstIndex(where: { $0.id == book.id }) {
             books[idx].title = title

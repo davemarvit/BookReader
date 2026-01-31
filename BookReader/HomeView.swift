@@ -15,17 +15,6 @@ struct HomeView: View {
     
     var body: some View {
         NavigationStack(path: $navigationPath) {
-            ZStack {
-                // Background Image
-                Image("WakeUpImage")
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .edgesIgnoringSafeArea(.all)
-                
-                // Dark Overlay
-                Color.black.opacity(0.3)
-                    .edgesIgnoringSafeArea(.all)
-                
                 VStack {
                     // Removed top Spacer() to move content up
                     // Add some top padding to clear status bar/notch naturally or use a fixed Spacer
@@ -48,7 +37,13 @@ struct HomeView: View {
                                     .fontWeight(.bold)
                                     .foregroundColor(.white)
                                     .multilineTextAlignment(.center)
-                                    .fixedSize(horizontal: false, vertical: true) // Allow unlimited height for text
+                                    .lineLimit(4) // Allow up to 4 lines
+                                    .minimumScaleFactor(0.8) // Shrink slightly if needed
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(Color.black.opacity(0.4))
+                                    .cornerRadius(10)
                                     .padding(.horizontal)
                             }
                         }
@@ -89,30 +84,50 @@ struct HomeView: View {
                     }
                     .padding(.bottom, 50)
                 }
-            }
-            .navigationDestination(for: NavigationDestination.self) { destination in
-                 switch destination {
-                 case .library:
-                     LibraryView(libraryManager: libraryManager, navigationPath: $navigationPath)
-                         .navigationBarBackButtonHidden(false)
-                 case .reader(let doc, let book):
-                     ReaderView(
-                         document: doc,
-                         bookID: book.id,
-                         libraryManager: libraryManager,
-                         onClose: {
-                             // Pop to Home
-                             navigationPath = []
-                         },
-                         onOpenLibrary: {
-                             // Swap to Library (Atomic)
-                             navigationPath = [.library]
-                         }
-                     )
-                 }
+                .navigationDestination(for: NavigationDestination.self) { destination in
+                     switch destination {
+                     case .library:
+                         LibraryView(libraryManager: libraryManager, navigationPath: $navigationPath)
+                             .navigationBarBackButtonHidden(false)
+                     case .reader(let doc, let book):
+                         // DEBUG
+                         let _ = print("Navigating to reader: \(book.title)")
+                         ReaderView(
+                             document: doc,
+                             bookID: book.id,
+                             libraryManager: libraryManager,
+                             onClose: {
+                                 // Pop to Home
+                                 navigationPath = []
+                             },
+                             onOpenLibrary: {
+                                 // Swap to Library (Atomic)
+                                 navigationPath = [.library]
+                             }
+                         )
+                     }
+                }
+                .padding(.horizontal)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    ZStack {
+                        if let book = lastReadBook,
+                           let coverURL = libraryManager.getCoverURL(for: book) {
+                            LocalCoverView(coverURL: coverURL)
+                                .aspectRatio(contentMode: .fit)
+                        } else {
+                            Image("WakeUpImage")
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                        }
+                        
+                        Color.black.opacity(0.3)
+                    }
+                    .edgesIgnoringSafeArea(.all)
+                )
             }
         }
-    }
+
     
     func playbackIconName(for book: BookMetadata) -> String {
         if audioController.isPlaying && audioController.currentBookID == book.id {
@@ -182,9 +197,45 @@ struct HomeView: View {
             
             audioController.loadBook(text: doc.text, bookID: book.id, title: book.title, cover: coverImage, initialIndex: book.lastParagraphIndex)
             
-            if !audioController.isSessionActive {
-                audioController.restorePosition(index: book.lastParagraphIndex)
+    }
+}
+
+
+}
+
+struct LocalCoverView: View {
+    let coverURL: URL
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let img = image {
+                Image(uiImage: img)
+                    .resizable()
+            } else {
+                Image("WakeUpImage")
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
             }
+        }
+        .onAppear {
+            loadImage()
+        }
+        .onChange(of: coverURL) { _ in
+            loadImage()
+        }
+    }
+
+    private func loadImage() {
+        // Load synchronously (it's a local file, usually fast enough) or async
+        // For stability, simple sync load is often better for local covers on main thread than async flicker
+        if let data = try? Data(contentsOf: coverURL),
+           let uiImage = UIImage(data: data) {
+            self.image = uiImage
+        } else {
+            // Keep default/nil
+            self.image = nil
         }
     }
 }
+

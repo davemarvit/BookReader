@@ -45,11 +45,33 @@ struct MetadataView: View {
                     }
                 }
                 
-                Button("Change Cover Image") {
-                    showingImagePicker = true
+                HStack(spacing: 20) {
+                    Button(action: {
+                        showingImagePicker = true
+                    }) {
+                        Text("Change Cover")
+                            .font(.headline)
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(Color.blue.opacity(0.1))
+                            .cornerRadius(10)
+                    }
+                    
+                    if book.coverFilename != nil {
+                        Button(action: {
+                            libraryManager.deleteCover(for: book)
+                        }) {
+                            Text("Delete Cover")
+                                .font(.headline)
+                                .foregroundColor(.red)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.red.opacity(0.1))
+                                .cornerRadius(10)
+                        }
+                    }
                 }
-                .font(.headline)
-                .padding()
+                .padding(.horizontal)
                 
                 Divider()
                 
