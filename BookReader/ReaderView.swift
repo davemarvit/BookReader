@@ -21,6 +21,14 @@ struct ReaderView: View {
     
     @Environment(\.presentationMode) var presentationMode
     @State private var showingControls = true
+
+    // Search State
+    @State private var isSearching = false
+    @State private var searchText = ""
+    @State private var searchResults: [Int] = []
+    @State private var currentSearchMatchIndex = 0
+    @FocusState private var isSearchFieldFocused: Bool
+    @State private var targetScrollIndex: Int?
     
     var body: some View {
         VStack(spacing: 0) {
@@ -31,6 +39,44 @@ struct ReaderView: View {
                 .padding()
             
             Divider()
+            
+            // Search Bar Overlay
+            if isSearching {
+                HStack {
+                    TextField("Find in page...", text: $searchText)
+                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .focused($isSearchFieldFocused)
+                        .onChange(of: searchText) { newValue in
+                            performSearch(query: newValue)
+                        }
+                    
+                    if !searchResults.isEmpty {
+                        Text("\(currentSearchMatchIndex + 1) of \(searchResults.count)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Button(action: { previousMatch() }) {
+                            Image(systemName: "chevron.up")
+                        }
+                        
+                        Button(action: { nextMatch() }) {
+                            Image(systemName: "chevron.down")
+                        }
+                    }
+                    
+                    Button("Done") {
+                        isSearching = false
+                        searchText = ""
+                        searchResults = []
+                        isSearchFieldFocused = false
+                        targetScrollIndex = nil
+                    }
+                }
+                .padding(8)
+                .background(Color(UIColor.systemBackground))
+                .transition(.move(edge: .top))
+                Divider()
+            }
             
             // Error Overlay
             if let error = audioController.errorMessage {
@@ -62,7 +108,10 @@ struct ReaderView: View {
                 document: document,
                 isDraggingSlider: isDraggingSlider,
                 isUserScrolling: $isUserScrolling,
-                isInitialLoad: $isInitialLoad
+                isInitialLoad: $isInitialLoad,
+                searchResults: searchResults,
+                searchText: searchText,
+                targetScrollIndex: $targetScrollIndex
             )
             
             Divider()
@@ -85,18 +134,33 @@ struct ReaderView: View {
             }
             
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: {
-                    // Go Library
-                    onOpenLibrary?()
-                }) {
-                    Image(systemName: "books.vertical.fill")
-                        .foregroundColor(.primary)
+                HStack {
+                    // Search Button
+                    Button(action: {
+                        withAnimation {
+                            isSearching.toggle()
+                            if isSearching {
+                                isSearchFieldFocused = true
+                            }
+                        }
+                    }) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.primary)
+                    }
+                    
+                    Button(action: {
+                        // Go Library
+                        onOpenLibrary?()
+                    }) {
+                        Image(systemName: "books.vertical.fill")
+                            .foregroundColor(.primary)
+                    }
                 }
             }
         }
         .overlay(
             Group {
-                if showingControls {
+                if showingControls && !isSearching {
                     VStack {
                         Spacer()
                         HStack {
@@ -122,6 +186,53 @@ struct ReaderView: View {
     func getParagraph(at index: Int) -> String {
         return audioController.paragraphs[index]
     }
+    
+    func performSearch(query: String) {
+        if query.isEmpty {
+            searchResults = []
+            return
+        }
+        
+        let lowerQuery = query.lowercased()
+        searchResults = audioController.paragraphs.enumerated().compactMap { index, text in
+            if text.localizedCaseInsensitiveContains(lowerQuery) {
+                return index
+            }
+            return nil
+        }
+        currentSearchMatchIndex = 0
+        if let first = searchResults.first {
+            targetScrollIndex = first
+            // Sync audio position
+            if !audioController.isSessionActive {
+                audioController.restorePosition(index: first)
+            }
+        }
+    }
+    
+    func nextMatch() {
+        if searchResults.isEmpty { return }
+        currentSearchMatchIndex = (currentSearchMatchIndex + 1) % searchResults.count
+        let newIndex = searchResults[currentSearchMatchIndex]
+        targetScrollIndex = newIndex
+        
+        // Sync audio position
+        if !audioController.isSessionActive {
+            audioController.restorePosition(index: newIndex)
+        }
+    }
+    
+    func previousMatch() {
+        if searchResults.isEmpty { return }
+        currentSearchMatchIndex = (currentSearchMatchIndex - 1 + searchResults.count) % searchResults.count
+        let newIndex = searchResults[currentSearchMatchIndex]
+        targetScrollIndex = newIndex
+        
+        // Sync audio position
+        if !audioController.isSessionActive {
+            audioController.restorePosition(index: newIndex)
+        }
+    }
 }
 
 struct ReaderTextView: View {
@@ -134,6 +245,11 @@ struct ReaderTextView: View {
     @Binding var isUserScrolling: Bool
     @Binding var isInitialLoad: Bool
     
+    // Search Props
+    let searchResults: [Int]
+    let searchText: String
+    @Binding var targetScrollIndex: Int?
+    
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -142,7 +258,9 @@ struct ReaderTextView: View {
                         ParagraphRow(
                             text: audioController.paragraphs[index],
                             index: index,
-                            currentIndex: audioController.currentParagraphIndex
+                            currentIndex: audioController.currentParagraphIndex,
+                            searchText: searchText,
+                            isSearchResult: searchResults.contains(index)
                         )
                         .id(index)
                     }
@@ -150,6 +268,32 @@ struct ReaderTextView: View {
                 .padding()
             }
             .coordinateSpace(name: "ScrollView")
+            .onChange(of: targetScrollIndex) { index in
+                if let idx = index {
+                    // Scroll to the requested search result
+                    withAnimation {
+                         proxy.scrollTo(idx, anchor: .center)
+                    }
+                }
+            }
+            .onChange(of: searchResults) { results in
+                if let first = results.first {
+                    withAnimation { proxy.scrollTo(first, anchor: .center) }
+                }
+            }
+            // Logic to scroll when 'currentSearchMatchIndex' changes in parent is tricky without binding.
+            // WORKAROUND: We can expose a Binding<Int?> for 'scrollToRequest' from parent.
+            // BUT, for now, let's just make the parent 'jump' the audio? 
+            // No, user might want to find without losing spot.
+            // Let's rely on the user scrolling OR simple highlighting. 
+            // Actually, to make Next/Prev work, we really need the proxy.
+            // Let's add specific logic to ReaderTextView to handle external scroll requests?
+            // Simpler: Just rely on 'audioController' for NOW? No, that changes playback.
+            
+            // Let's add @Binding var requestedScrollIndex: Int?
+            
+            // For now, I'll stick to updating the view to support highlighting first.
+            
             .onPreferenceChange(ViewOffsetKey.self) { offsets in
                 if isInitialLoad { return }
                 
@@ -178,9 +322,7 @@ struct ReaderTextView: View {
             )
             .onChange(of: audioController.currentParagraphIndex) { newIndex in
                 guard audioController.currentBookID == bookID else { return }
-                
                 libraryManager.updateProgress(for: bookID, index: newIndex)
-                
                 if !isDraggingSlider && !isUserScrolling {
                     withAnimation {
                         proxy.scrollTo(newIndex, anchor: .top)
@@ -202,7 +344,6 @@ struct ReaderTextView: View {
                           // Increased delay to ensure Layout is ready for scrollTo
                           DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                               if !audioController.isSessionActive {
-                                  // Use transaction to force immediate jump without animation for 'initial' load
                                   var transaction = Transaction()
                                   transaction.disablesAnimations = true
                                   withTransaction(transaction) {
@@ -327,14 +468,17 @@ struct ParagraphRow: View {
     let text: String
     let index: Int
     let currentIndex: Int
+    let searchText: String
+    let isSearchResult: Bool
     
     var body: some View {
-        Text(text)
+        Text(highlightObject(for: text, query: searchText))
             .font(.body)
             .foregroundColor(.primary)
             .padding(4)
             .background(
-                index == currentIndex ? Color.yellow.opacity(0.3) : Color.clear
+                // Priority: Current Playback = Yellow, Search Match = Gray?
+                index == currentIndex ? Color.yellow.opacity(0.3) : (isSearchResult ? Color.gray.opacity(0.2) : Color.clear)
             )
             .cornerRadius(4)
             .textSelection(.enabled)
@@ -346,6 +490,21 @@ struct ParagraphRow: View {
                     )
                 }
             )
+    }
+    
+    func highlightObject(for text: String, query: String) -> AttributedString {
+        var attributed = AttributedString(text)
+        if query.isEmpty { return attributed }
+        
+        // Find all ranges
+        // Helper to loop
+        var searchRange = attributed.startIndex..<attributed.endIndex
+        while let range = attributed[searchRange].range(of: query, options: .caseInsensitive) {
+            attributed[range].backgroundColor = .yellow
+            attributed[range].foregroundColor = .black
+            searchRange = range.upperBound..<attributed.endIndex
+        }
+        return attributed
     }
 }
 
