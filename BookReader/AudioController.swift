@@ -34,6 +34,8 @@ class AudioController: NSObject, ObservableObject {
     
     // Stable state validation
     @Published var isSessionActive: Bool = false
+    @Published var diagnosticDetails: String = "Diagnostics: Initializing..."
+    private var playbackGeneration = UUID()
     
     // Task management
     private var activeTask: Task<Void, Never>?
@@ -55,8 +57,7 @@ class AudioController: NSObject, ObservableObject {
     
     // MARK: - Audio Engines
     // Google TTS / Pre-recorded
-    private let player = AVQueuePlayer()
-    private var playerLooper: Any? // Not using looper, managing queue manually
+    private let player = AVQueuePlayer() // Restored rock-solid 5-paragraph AVQueuePlayer
     private let ttsClient = GoogleTTSClient()
     
     // Apple Local TTS
@@ -70,9 +71,10 @@ class AudioController: NSObject, ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private var playerItemObservation: NSKeyValueObservation?
     private var timeObserver: Any?
+    private var appleTTSDebounceTimer: Timer?
+    private var currentAppleUtterance: AVSpeechUtterance?
     
     // Queue Management
-    // Maps [AVPlayerItem : ParagraphIndex] to track which item corresponds to which paragraph
     private var itemIndexMap: [AVPlayerItem: Int] = [:]
 
     override init() {
@@ -81,10 +83,10 @@ class AudioController: NSObject, ObservableObject {
         setupRemoteCommandCenter()
         localSynthesizer.delegate = self
         
-        // Optimize for speech
+        // Optimize for speech latency
         player.automaticallyWaitsToMinimizeStalling = false
         
-        // Observe AVQueuePlayer currentItem changes to auto-advance index
+        // Observe AVQueuePlayer currentItem changes to auto-advance index natively
         playerItemObservation = player.observe(\.currentItem, options: [.new, .old]) { [weak self] player, change in
             guard let self = self else { return }
             if let newItem = change.newValue as? AVPlayerItem {
@@ -104,7 +106,9 @@ class AudioController: NSObject, ObservableObject {
         Timer.publish(every: 1.0, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
-                guard let self = self, self.isPlaying else { return }
+                guard let self = self else { return }
+                self.updateDiagnosticDetails()
+                guard self.isPlaying else { return }
                 StatsManager.shared.logReadingTime(seconds: 1.0)
             }
             .store(in: &cancellables)
@@ -191,6 +195,7 @@ class AudioController: NSObject, ObservableObject {
         self.audioCache.removeAll()
         self.downloadTasks.values.forEach { $0.cancel() }
         self.downloadTasks.removeAll()
+        self.playbackGeneration = UUID()
         
         // Preload if Google
         if isGoogleMode {
@@ -198,7 +203,6 @@ class AudioController: NSObject, ObservableObject {
              // Or just pre-fetch.
              Task {
                  await preloadAudio(for: initialIndex)
-                 // Preload a bit more aggressively
                  await maintainQueue(currentIndex: initialIndex)
              }
         }
@@ -231,9 +235,12 @@ class AudioController: NSObject, ObservableObject {
     }
     
     func stopEverything() {
+        self.playbackGeneration = UUID()
         pause()
         player.removeAllItems()
         itemIndexMap.removeAll()
+        appleTTSDebounceTimer?.invalidate()
+        currentAppleUtterance = nil
         localSynthesizer.stopSpeaking(at: .immediate)
     }
     
@@ -269,10 +276,10 @@ class AudioController: NSObject, ObservableObject {
         } else {
             // If paused, just move the needle and clear queue so next Play starts here
             currentParagraphIndex = index
-            // Clear queue to prevent resuming old position
             player.removeAllItems()
             itemIndexMap.removeAll()
-            // Ensure local synth is stopped (should be if paused)
+            appleTTSDebounceTimer?.invalidate()
+            currentAppleUtterance = nil
             localSynthesizer.stopSpeaking(at: .immediate)
             
             // Background preload if Google
@@ -283,10 +290,12 @@ class AudioController: NSObject, ObservableObject {
     }
     
     private func jumpToParagraph(at index: Int) {
-        // Stop current
+        self.playbackGeneration = UUID()
         player.pause()
         player.removeAllItems()
         itemIndexMap.removeAll()
+        appleTTSDebounceTimer?.invalidate()
+        currentAppleUtterance = nil
         localSynthesizer.stopSpeaking(at: .immediate)
         
         currentParagraphIndex = index
@@ -294,7 +303,6 @@ class AudioController: NSObject, ObservableObject {
         activeTask?.cancel()
         
         if isGoogleMode {
-            // Re-build queue starting from index
             activeTask = Task {
                  await EnqueueAndPlay(from: index)
             }
@@ -337,9 +345,16 @@ class AudioController: NSObject, ObservableObject {
             utterance.voice = voice
         }
         
-        // Map rate
-        let appleRate = min(max(AVSpeechUtteranceDefaultSpeechRate * playbackRate, AVSpeechUtteranceMinimumSpeechRate), AVSpeechUtteranceMaximumSpeechRate)
+        // Apple TTS 'default' is 0.5. 'maximum' is 1.0 (which is absurdly fast, like 5x human speed).
+        // 1.0 slider = 0.5 rate
+        // 2.0 slider = 0.625 rate
+        // 3.0 slider = 0.75 rate
+        let baseRate = AVSpeechUtteranceDefaultSpeechRate
+        let mappedRate = baseRate + ((playbackRate - 1.0) * 0.125)
+        let appleRate = min(max(mappedRate, AVSpeechUtteranceMinimumSpeechRate), AVSpeechUtteranceMaximumSpeechRate)
         utterance.rate = appleRate
+        
+        self.currentAppleUtterance = utterance
         
         DispatchQueue.main.async {
             self.localSynthesizer.speak(utterance)
@@ -348,10 +363,11 @@ class AudioController: NSObject, ObservableObject {
         }
     }
     
-    // MARK: - Google TTS Implementation (AVQueuePlayer)
+    // MARK: - Google TTS Implementation (AVQueuePlayer Restored)
     
     private func playGoogle() {
         if player.currentItem != nil {
+            player.defaultRate = playbackRate
             player.play()
             player.rate = playbackRate
             isPlaying = true
@@ -366,37 +382,32 @@ class AudioController: NSObject, ObservableObject {
     }
     
     private func EnqueueAndPlay(from index: Int) async {
-        // 1. Fetch current
-        // 2. Insert
-        // 3. Play
-        // 4. Fetch Next & Insert
-        
         guard index < paragraphs.count else { return }
         
         DispatchQueue.main.async { self.isLoading = true }
+        let expectedGen = self.playbackGeneration
         
         do {
-            // Trigger fetch for current
             let currentTask = await ensureAudioTask(for: index)
-            // Trigger fetches for next few immediately (Parallel)
             await maintainQueue(currentIndex: index)
             
             let url = try await currentTask.value
+            guard self.playbackGeneration == expectedGen else { return }
+            
             let item = AVPlayerItem(url: url)
             
-            // Lock UI thread for queue manipulation
             await MainActor.run {
                 self.itemIndexMap[item] = index
                 if self.player.items().isEmpty {
                     self.player.insert(item, after: nil)
                 }
                 
+                self.player.defaultRate = self.playbackRate
                 self.player.play()
                 self.player.rate = self.playbackRate
                 self.isPlaying = true
                 self.isLoading = false
             }
-            
         } catch {
             print("Playback Error: \(error)")
             DispatchQueue.main.async {
@@ -406,12 +417,9 @@ class AudioController: NSObject, ObservableObject {
         }
     }
     
-    /// Ensures we have the next few items in the queue
     @MainActor
     private func maintainQueue(currentIndex: Int) async {
-        let lookahead = 5 // Increased buffer
-        
-        // 1. Start all downloads in parallel
+        let lookahead = 5
         var tasks: [(Int, Task<URL, Error>)] = []
         for i in 1...lookahead {
             let nextIndex = currentIndex + i
@@ -420,52 +428,71 @@ class AudioController: NSObject, ObservableObject {
             tasks.append((nextIndex, task))
         }
         
-        // 2. Await and insert in order
+        let expectedGen = self.playbackGeneration
         for (nextIndex, task) in tasks {
             if let url = try? await task.value {
-                     let items = self.player.items()
-                     // Double check if already queued
-                     let alreadyQueued = items.contains { self.itemIndexMap[$0] == nextIndex }
-                     
-                     if !alreadyQueued {
-                         let newItem = AVPlayerItem(url: url)
-                         self.itemIndexMap[newItem] = nextIndex
-                         if let last = items.last {
-                              self.player.insert(newItem, after: last)
-                         } else {
-                              self.player.insert(newItem, after: nil)
-                         }
+                 guard self.playbackGeneration == expectedGen else { return }
+                 let items = self.player.items()
+                 let alreadyQueued = items.contains { self.itemIndexMap[$0] == nextIndex }
+                 
+                 if !alreadyQueued {
+                     let newItem = AVPlayerItem(url: url)
+                     self.itemIndexMap[newItem] = nextIndex
+                     if let last = items.last {
+                          self.player.insert(newItem, after: last)
+                     } else {
+                          self.player.insert(newItem, after: nil)
                      }
+                 }
             }
         }
     }
     
     private func handleCurrentItemChange(to item: AVPlayerItem) {
         guard let index = itemIndexMap[item] else { return }
-        print("DEBUG: AVQueuePlayer advanced to paragraph \(index)")
-        
         DispatchQueue.main.async {
             self.currentParagraphIndex = index
             self.updateNowPlayingInfo()
+            self.updateDiagnosticDetails()
         }
         
-        // Trigger maintenance (prefetch next items)
+        let expectedGen = self.playbackGeneration
         Task {
+            guard self.playbackGeneration == expectedGen else { return }
             await maintainQueue(currentIndex: index)
         }
     }
     
     private func updatePlaybackRate() {
+        print("DIAGNOSTIC: updatePlaybackRate called. slider:\(playbackRate)")
         if isPlaying {
             if isGoogleMode {
+                player.defaultRate = playbackRate
                 player.rate = playbackRate
             } else {
-                // Apple TTS rate can't be changed mid-utterance easily without stopping?
-                // Actually AVSpeechSynthesizer stop/continue works, but rate is on Utterance.
-                // So dynamic rate change for Apple TTS is hard. Ignore for now.
+                appleTTSDebounceTimer?.invalidate()
+                appleTTSDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) { [weak self] _ in
+                    guard let self = self, self.isPlaying, !self.isGoogleMode else { return }
+                    self.currentAppleUtterance = nil
+                    self.localSynthesizer.stopSpeaking(at: .immediate)
+                    self.speakLocalParagraph(index: self.currentParagraphIndex)
+                }
             }
             updateNowPlayingInfo(playbackRate: Double(playbackRate))
         }
+        updateDiagnosticDetails()
+    }
+    
+    private func updateDiagnosticDetails() {
+         let engine = self.isGoogleMode ? "Google" : "Apple Fallback!"
+         let pRate = String(format: "%.2f", self.playbackRate)
+         let aRate = String(format: "%.2f", self.player.rate)
+         let cInt = self.player.currentItem != nil ? 1 : 0
+         let stat = self.isPlaying ? "Playing" : "Paused"
+         
+         DispatchQueue.main.async {
+             self.diagnosticDetails = "Engine: \(engine) | Slider: \(pRate) | True Rate: \(aRate) | Queue: \(cInt) | \(stat)"
+         }
     }
     
     // MARK: - Downloader Logic (Preserved & Simplified)
@@ -622,6 +649,9 @@ class AudioController: NSObject, ObservableObject {
 extension AudioController: AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         guard !isGoogleMode else { return }
+        
+        // Only auto-advance if it's our active tracked utterance
+        guard utterance == currentAppleUtterance else { return }
         
         if isSessionActive {
             // Auto-advance

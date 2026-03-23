@@ -95,6 +95,7 @@ struct HomeView: View {
                         if let book = lastReadBook,
                            let coverURL = libraryManager.getCoverURL(for: book) {
                             LocalCoverView(coverURL: coverURL)
+                                .id(book.id)
                                 .aspectRatio(contentMode: .fit)
                         } else {
                             Image("WakeUpImage")

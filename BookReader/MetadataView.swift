@@ -22,6 +22,7 @@ struct MetadataView: View {
     // Web URL State
     @State private var showingUrlAlert = false
     @State private var coverUrlString = ""
+    @State private var isDownloading = false
     
     var body: some View {
         ScrollView {
@@ -129,21 +130,31 @@ struct MetadataView: View {
                         .frame(height: 150)
                         .border(Color.gray.opacity(0.2))
                         .cornerRadius(8)
-                }
-                .padding()
+                
+                Spacer()
             }
             .padding()
         }
+        }
         .navigationTitle("Book Details")
-
-        .sheet(isPresented: $showingImagePicker) {
-            ImagePicker(image: $inputImage)
-        }
-        .onChange(of: inputImage) { newImage in
-            if let img = newImage {
-                libraryManager.updateCover(for: book, image: img)
+        .navigationBarTitleDisplayMode(.inline)
+        .overlay(
+            Group {
+                if isDownloading {
+                    Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Downloading...")
+                            .font(.headline)
+                    }
+                    .padding(30)
+                    .background(Color(UIColor.systemBackground))
+                    .cornerRadius(12)
+                    .shadow(radius: 20)
+                }
             }
-        }
+        )
         .onAppear {
             // Initialize local state
             self.title = book.title
@@ -169,6 +180,7 @@ struct MetadataView: View {
     
     func downloadCoverFromUrl() {
         guard let url = URL(string: coverUrlString.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
+        isDownloading = true
         Task {
             do {
                 let (data, _) = try await URLSession.shared.data(from: url)
@@ -176,10 +188,14 @@ struct MetadataView: View {
                     await MainActor.run {
                         libraryManager.updateCover(for: book, image: image)
                         coverUrlString = ""
+                        isDownloading = false
                     }
+                } else {
+                    await MainActor.run { isDownloading = false }
                 }
             } catch {
                 print("Failed to download image: \(error.localizedDescription)")
+                await MainActor.run { isDownloading = false }
             }
         }
     }

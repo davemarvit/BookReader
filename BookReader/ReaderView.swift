@@ -40,41 +40,27 @@ struct ReaderView: View {
             
             Divider()
             
-            // Search Bar Overlay
+            // Custom Search Bar
             if isSearching {
                 HStack {
-                    TextField("Find in page...", text: $searchText)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                    TextField("Search book...", text: $searchText)
+                        .textFieldStyle(.roundedBorder)
                         .focused($isSearchFieldFocused)
-                        .onChange(of: searchText) { newValue in
-                            performSearch(query: newValue)
-                        }
+                        .padding(.leading)
+                        .submitLabel(.search)
                     
-                    if !searchResults.isEmpty {
-                        Text("\(currentSearchMatchIndex + 1) of \(searchResults.count)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        Button(action: { previousMatch() }) {
-                            Image(systemName: "chevron.up")
-                        }
-                        
-                        Button(action: { nextMatch() }) {
-                            Image(systemName: "chevron.down")
+                    Button("Cancel") {
+                        withAnimation {
+                            isSearching = false
+                            searchText = ""
                         }
                     }
-                    
-                    Button("Done") {
-                        isSearching = false
-                        searchText = ""
-                        searchResults = []
-                        isSearchFieldFocused = false
-                        targetScrollIndex = nil
-                    }
+                    .padding(.trailing)
                 }
-                .padding(8)
+                .padding(.vertical, 8)
                 .background(Color(UIColor.systemBackground))
-                .transition(.move(edge: .top))
+                .transition(.move(edge: .top).combined(with: .opacity))
+                
                 Divider()
             }
             
@@ -113,27 +99,52 @@ struct ReaderView: View {
                 searchText: searchText,
                 targetScrollIndex: $targetScrollIndex
             )
-            
-            Divider()
-            
-            ReaderControlsView(
-                isDraggingSlider: $isDraggingSlider,
-                dragProgress: $dragProgress
-            )
+            .safeAreaInset(edge: .bottom) {
+                ReaderControlsView(
+                    isDraggingSlider: $isDraggingSlider,
+                    dragProgress: $dragProgress
+                )
+                .background(.regularMaterial)
+                .overlay(Rectangle().frame(width: nil, height: 1, alignment: .top).foregroundColor(Color.gray.opacity(0.3)), alignment: .top)
+            }
         } // End Main VStack
+        .onChange(of: searchText) { newValue in
+            performSearch(query: newValue)
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                // Search Button
-                Button(action: {
-                    withAnimation {
-                        isSearching.toggle()
-                        if isSearching {
-                            isSearchFieldFocused = true
+                HStack(spacing: 16) {
+                    if isSearching && !searchResults.isEmpty {
+                        Text("\(currentSearchMatchIndex + 1) of \(searchResults.count)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        
+                        Button(action: { previousMatch() }) {
+                            Image(systemName: "chevron.up")
+                        }
+                        
+                        Button(action: { nextMatch() }) {
+                            Image(systemName: "chevron.down")
                         }
                     }
-                }) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.primary)
+                    
+                    // Search Button
+                    Button(action: {
+                        withAnimation {
+                            isSearching.toggle()
+                            // When opening search, SwiftUI focus works best with a slight delay
+                            if isSearching {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                    isSearchFieldFocused = true
+                                }
+                            } else {
+                                searchText = ""
+                            }
+                        }
+                    }) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(isSearching ? .accentColor : .primary)
+                    }
                 }
             }
         }
@@ -431,7 +442,7 @@ struct ReaderControlsView: View {
             // Speed Control
             HStack {
                 Image(systemName: "tortoise.fill").font(.caption)
-                Slider(value: $audioController.playbackRate, in: 0.5...3.0, step: 0.1)
+                Slider(value: $audioController.playbackRate, in: 0.5...4.0, step: 0.1)
                 Image(systemName: "hare.fill").font(.caption)
                 Text(String(format: "%.1fx", audioController.playbackRate))
                     .font(.caption)

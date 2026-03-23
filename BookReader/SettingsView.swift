@@ -3,8 +3,8 @@ import AVFoundation
 
 struct SettingsView: View {
     @ObservedObject var settings = SettingsManager.shared
-    
     @ObservedObject var stats = StatsManager.shared
+    @State private var showingResetConfirmation = false
     
     // Apple Voices (Computed to keep it dynamic)
     var appleVoices: [AVSpeechSynthesisVoice] {
@@ -26,7 +26,19 @@ struct SettingsView: View {
     
     var body: some View {
         Form {
-            Section(header: Text("Reading Stats")) {
+            Section(header: 
+                HStack {
+                    Text("Reading Stats")
+                    Spacer()
+                    Button(action: {
+                        showingResetConfirmation = true
+                    }) {
+                        Text("Reset")
+                            .foregroundColor(.red)
+                            .textCase(.none)
+                    }
+                }
+            ) {
                 StatRow(label: "Today", value: stats.formatDuration(stats.timeToday))
                 StatRow(label: "This Week", value: stats.formatDuration(stats.timeThisWeek))
                 StatRow(label: "This Month", value: stats.formatDuration(stats.timeThisMonth))
@@ -84,6 +96,14 @@ struct SettingsView: View {
             Section(footer: Text(apiKeyStatus)) {
                 // Info footer
             }
+        }
+        .confirmationDialog("Reset Stats", isPresented: $showingResetConfirmation, titleVisibility: .visible) {
+            Button("Reset reading stats", role: .destructive) {
+                stats.resetStats()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will permanently clear all your historical reading times. This action cannot be undone.")
         }
         .navigationTitle("Settings")
         .toolbar {

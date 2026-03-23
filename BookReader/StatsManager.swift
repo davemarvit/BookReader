@@ -30,6 +30,12 @@ class StatsManager: ObservableObject {
         UserDefaults.standard.set(dailyProgress, forKey: kDailyProgress)
     }
     
+    func resetStats() {
+        totalReadingTime = 0
+        dailyProgress.removeAll()
+        saveStats()
+    }
+    
     // MARK: - Tracking
     
     func logReadingTime(seconds: TimeInterval) {

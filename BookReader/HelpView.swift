@@ -12,6 +12,10 @@ struct HelpView: View {
                     Label("Tracking Progress", systemImage: "chart.pie.fill")
                 }
                 
+                NavigationLink(destination: TextHelpView(title: "Reading Statistics", content: "**Cumulative Listening Time**\n\nThe app automatically tracks exactly how much time you spend listening to your books. You can view your total listening times for Today, This Week, This Month, This Year, and All Time by navigating to the **Settings** tab.\n\n**Resetting Your Stats**\nIf you ever want to clear your historical listening times, you can tap the red 'Reset Reading Stats' button in the Settings menu. \n\n*Note: Resetting your cumulative listening stats will NOT erase or affect your bookmarks, reading progress rings, or your current position inside any of your books!*")) {
+                    Label("Reading Statistics", systemImage: "clock.fill")
+                }
+                
                 NavigationLink(destination: TextHelpView(title: "Deleting Books", content: "To remove a book from your device permanently:\n\n1. Go to the **Library** tab.\n2. Simply **swipe left** across the row of the book you wish to remove.\n3. Tap the red **Delete** button that appears.\n\n*Note: This will delete both the book file and any generated audio/metadata from your local storage. This action cannot be undone.*")) {
                     Label("Deleting Books", systemImage: "trash.fill")
                 }

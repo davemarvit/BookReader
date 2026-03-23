@@ -9,6 +9,10 @@ struct LibraryView: View {
     // Local Navigation Path
     @State private var navigationPath: [NavigationDestination] = []
     
+    // Deletion State
+    @State private var showingDeleteConfirmation = false
+    @State private var indexSetToDelete: IndexSet?
+    
     init(libraryManager: LibraryManager) {
         self.libraryManager = libraryManager
     }
@@ -38,13 +42,26 @@ struct LibraryView: View {
                     Button(action: {
                         openBook(book)
                     }) {
-                            BookRow(book: book, libraryManager: libraryManager)
-                        }
+                        BookRow(book: book, libraryManager: libraryManager)
                     }
-                    .onDelete(perform: libraryManager.deleteBook)
                 }
-                .navigationTitle("My Library")
-                .navigationDestination(for: NavigationDestination.self) { destination in
+                .onDelete { indexSet in
+                    indexSetToDelete = indexSet
+                    showingDeleteConfirmation = true
+                }
+            }
+            .navigationTitle("My Library")
+            .confirmationDialog("Delete Book?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) {
+                    if let indexSet = indexSetToDelete {
+                        libraryManager.deleteBook(at: indexSet)
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This will permanently remove the book and your reading progress from this device.")
+            }
+            .navigationDestination(for: NavigationDestination.self) { destination in
                     if case let .reader(doc, book) = destination {
                         ReaderView(
                             document: doc,
