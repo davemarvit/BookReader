@@ -81,6 +81,9 @@ class AudioController: NSObject, ObservableObject {
         setupRemoteCommandCenter()
         localSynthesizer.delegate = self
         
+        // Optimize for speech
+        player.automaticallyWaitsToMinimizeStalling = false
+        
         // Observe AVQueuePlayer currentItem changes to auto-advance index
         playerItemObservation = player.observe(\.currentItem, options: [.new, .old]) { [weak self] player, change in
             guard let self = self else { return }
@@ -156,8 +159,8 @@ class AudioController: NSObject, ObservableObject {
         }
         
         // Scrubbing (Seek)
-        commandCenter.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let self = self, let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+        commandCenter.changePlaybackPositionCommand.addTarget { [weak self] _ in
+            guard self != nil else { return .commandFailed }
             // This is tricky with paragraph based playback. 
             // We'll treat the "Track" as the FULL BOOK? Or the single paragraph?
             // Usually easier to treat as single paragraph for scrub, but MPInfo is hard.
@@ -195,7 +198,8 @@ class AudioController: NSObject, ObservableObject {
              // Or just pre-fetch.
              Task {
                  await preloadAudio(for: initialIndex)
-                 await preloadAudio(for: initialIndex + 1)
+                 // Preload a bit more aggressively
+                 await maintainQueue(currentIndex: initialIndex)
              }
         }
     }
@@ -254,6 +258,28 @@ class AudioController: NSObject, ObservableObject {
     func skipBackward(amount: Int = 1) {
         let prevIndex = max(currentParagraphIndex - amount, 0)
         jumpToParagraph(at: prevIndex)
+    }
+    
+    func setManualPlaybackPosition(index: Int) {
+        guard index >= 0 && index < totalParagraphs else { return }
+        
+        if isPlaying {
+            // If playing, jump immediately
+            jumpToParagraph(at: index)
+        } else {
+            // If paused, just move the needle and clear queue so next Play starts here
+            currentParagraphIndex = index
+            // Clear queue to prevent resuming old position
+            player.removeAllItems()
+            itemIndexMap.removeAll()
+            // Ensure local synth is stopped (should be if paused)
+            localSynthesizer.stopSpeaking(at: .immediate)
+            
+            // Background preload if Google
+            if isGoogleMode {
+                Task { await maintainQueue(currentIndex: index) }
+            }
+        }
     }
     
     private func jumpToParagraph(at index: Int) {
@@ -350,7 +376,12 @@ class AudioController: NSObject, ObservableObject {
         DispatchQueue.main.async { self.isLoading = true }
         
         do {
-            let url = try await getAudioURL(for: index)
+            // Trigger fetch for current
+            let currentTask = await ensureAudioTask(for: index)
+            // Trigger fetches for next few immediately (Parallel)
+            await maintainQueue(currentIndex: index)
+            
+            let url = try await currentTask.value
             let item = AVPlayerItem(url: url)
             
             // Lock UI thread for queue manipulation
@@ -366,9 +397,6 @@ class AudioController: NSObject, ObservableObject {
                 self.isLoading = false
             }
             
-            // Lookahead
-            await maintainQueue(currentIndex: index)
-            
         } catch {
             print("Playback Error: \(error)")
             DispatchQueue.main.async {
@@ -379,38 +407,35 @@ class AudioController: NSObject, ObservableObject {
     }
     
     /// Ensures we have the next few items in the queue
+    @MainActor
     private func maintainQueue(currentIndex: Int) async {
-        let lookahead = 2
+        let lookahead = 5 // Increased buffer
+        
+        // 1. Start all downloads in parallel
+        var tasks: [(Int, Task<URL, Error>)] = []
         for i in 1...lookahead {
             let nextIndex = currentIndex + i
             guard nextIndex < paragraphs.count else { break }
-            
-            // Check if already in queue?
-            // AVQueuePlayer doesn't easily let us inspect index of items relative to model, 
-            // so we'll rely on our rigorous 'itemIndexMap' or just check if we have enough items.
-            // Simplify: Just try to fetch and append if NOT duplicate.
-            
-            // Optimization: If `downloadTasks` already has it, we wait.
-            // If already cached, fast.
-            
-            // Perform fetch
-            if let url = try? await getAudioURL(for: nextIndex) {
-                // Check if this particular URL/Index is already in the player's items
-                // This must be main thread check
-                await MainActor.run {
-                    let items = self.player.items()
-                    let alreadyQueued = items.contains { self.itemIndexMap[$0] == nextIndex }
-                    
-                    if !alreadyQueued {
-                        let newItem = AVPlayerItem(url: url)
-                        self.itemIndexMap[newItem] = nextIndex
-                        if let last = items.last {
-                             self.player.insert(newItem, after: last)
-                        } else {
-                             self.player.insert(newItem, after: nil)
-                        }
-                    }
-                }
+            let task = ensureAudioTask(for: nextIndex)
+            tasks.append((nextIndex, task))
+        }
+        
+        // 2. Await and insert in order
+        for (nextIndex, task) in tasks {
+            if let url = try? await task.value {
+                     let items = self.player.items()
+                     // Double check if already queued
+                     let alreadyQueued = items.contains { self.itemIndexMap[$0] == nextIndex }
+                     
+                     if !alreadyQueued {
+                         let newItem = AVPlayerItem(url: url)
+                         self.itemIndexMap[newItem] = nextIndex
+                         if let last = items.last {
+                              self.player.insert(newItem, after: last)
+                         } else {
+                              self.player.insert(newItem, after: nil)
+                         }
+                     }
             }
         }
     }
@@ -460,20 +485,25 @@ class AudioController: NSObject, ObservableObject {
     
     private func preloadAudio(for index: Int) async {
         guard index < paragraphs.count else { return }
-        _ = try? await getAudioURL(for: index)
+        _ = await ensureAudioTask(for: index).result
     }
     
-    private func getAudioURL(for index: Int) async throws -> URL {
+    // Returns an existing or new task for the index
+    @MainActor
+    private func ensureAudioTask(for index: Int) -> Task<URL, Error> {
+        // If already cached, return a completed task
         if let url = audioCache[index], FileManager.default.fileExists(atPath: url.path) {
-             return url
+            return Task { return url }
         }
         
-        if let existingTask = downloadTasks[index] {
-            return try await existingTask.value
+        // If already downloading, return that task
+        if let existing = downloadTasks[index] {
+            return existing
         }
         
+        // Start new task
         // Wrap network call in Background Task
-        await MainActor.run { startBackgroundTask() }
+        startBackgroundTask()
         
         let task = Task<URL, Error> {
             do {
@@ -494,15 +524,20 @@ class AudioController: NSObject, ObservableObject {
         
         downloadTasks[index] = task
         
-        do {
-            let url = try await task.value
-            audioCache[index] = url
-            downloadTasks[index] = nil
-            return url
-        } catch {
-            downloadTasks[index] = nil
-            throw error
+        // Cache on completion (side effect)
+        Task {
+            if let url = try? await task.value {
+                audioCache[index] = url
+                downloadTasks[index] = nil
+            }
         }
+        
+        return task
+    }
+    
+    @MainActor
+    private func getAudioURL(for index: Int) async throws -> URL {
+        return try await ensureAudioTask(for: index).value
     }
     
     // MARK: - MPNowPlayingInfoCenter

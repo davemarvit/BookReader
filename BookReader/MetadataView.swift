@@ -19,6 +19,10 @@ struct MetadataView: View {
     @State private var showingImagePicker = false
     @State private var inputImage: UIImage?
     
+    // Web URL State
+    @State private var showingUrlAlert = false
+    @State private var coverUrlString = ""
+    
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
@@ -45,16 +49,30 @@ struct MetadataView: View {
                     }
                 }
                 
-                HStack(spacing: 20) {
-                    Button(action: {
-                        showingImagePicker = true
-                    }) {
-                        Text("Change Cover")
-                            .font(.headline)
-                            .padding()
-                            .frame(maxWidth: .infinity)
-                            .background(Color.blue.opacity(0.1))
-                            .cornerRadius(10)
+                VStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        Button(action: {
+                            showingImagePicker = true
+                        }) {
+                            Text("From Photos")
+                                .font(.subheadline).bold()
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.blue.opacity(0.1))
+                                .cornerRadius(10)
+                        }
+                        
+                        Button(action: {
+                            showingUrlAlert = true
+                        }) {
+                            Text("Paste URL")
+                                .font(.subheadline).bold()
+                                .foregroundColor(.green)
+                                .padding()
+                                .frame(maxWidth: .infinity)
+                                .background(Color.green.opacity(0.1))
+                                .cornerRadius(10)
+                        }
                     }
                     
                     if book.coverFilename != nil {
@@ -62,7 +80,7 @@ struct MetadataView: View {
                             libraryManager.deleteCover(for: book)
                         }) {
                             Text("Delete Cover")
-                                .font(.headline)
+                                .font(.subheadline).bold()
                                 .foregroundColor(.red)
                                 .padding()
                                 .frame(maxWidth: .infinity)
@@ -72,6 +90,16 @@ struct MetadataView: View {
                     }
                 }
                 .padding(.horizontal)
+                .alert("Paste Image URL", isPresented: $showingUrlAlert) {
+                    TextField("https://...", text: $coverUrlString)
+                        .keyboardType(.URL)
+                        .autocapitalization(.none)
+                    
+                    Button("Download", action: downloadCoverFromUrl)
+                    Button("Cancel", role: .cancel) { coverUrlString = "" }
+                } message: {
+                    Text("Enter a direct link to an image (JPG/PNG).")
+                }
                 
                 Divider()
                 
@@ -107,20 +135,7 @@ struct MetadataView: View {
             .padding()
         }
         .navigationTitle("Book Details")
-        .navigationBarBackButtonHidden(true)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button(action: { onRequestHome?() }) {
-                    Image(systemName: "house.fill").foregroundColor(.primary)
-                }
-            }
-            
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: { onRequestLibrary?() }) {
-                    Image(systemName: "books.vertical.fill").foregroundColor(.primary)
-                }
-            }
-        }
+
         .sheet(isPresented: $showingImagePicker) {
             ImagePicker(image: $inputImage)
         }
@@ -150,6 +165,23 @@ struct MetadataView: View {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         return formatter.string(from: date)
+    }
+    
+    func downloadCoverFromUrl() {
+        guard let url = URL(string: coverUrlString.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                if let image = UIImage(data: data) {
+                    await MainActor.run {
+                        libraryManager.updateCover(for: book, image: image)
+                        coverUrlString = ""
+                    }
+                }
+            } catch {
+                print("Failed to download image: \(error.localizedDescription)")
+            }
+        }
     }
 }
 

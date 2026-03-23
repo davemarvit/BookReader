@@ -86,6 +86,13 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                NavigationLink(destination: HelpView()) {
+                    Text("Help")
+                }
+            }
+        }
     }
     
     var apiKeyStatus: String {

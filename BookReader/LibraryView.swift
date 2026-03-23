@@ -6,12 +6,11 @@ struct LibraryView: View {
     @ObservedObject var settings = SettingsManager.shared
     @State private var isImporterPresented = false
     
-    // Shared Navigation Path
-    @Binding var navigationPath: [NavigationDestination]
+    // Local Navigation Path
+    @State private var navigationPath: [NavigationDestination] = []
     
-    init(libraryManager: LibraryManager = LibraryManager(), navigationPath: Binding<[NavigationDestination]> = .constant([])) {
+    init(libraryManager: LibraryManager) {
         self.libraryManager = libraryManager
-        self._navigationPath = navigationPath
     }
     
     var sortedBooks: [BookMetadata] {
@@ -33,27 +32,37 @@ struct LibraryView: View {
     }
     
     var body: some View {
-        // NavigationView removed to prevent nesting loops with HomeView
-        List {
-            ForEach(sortedBooks) { book in
-                Button(action: {
-                    openBook(book)
-                }) {
-                        BookRow(book: book, libraryManager: libraryManager)
+        NavigationStack(path: $navigationPath) {
+            List {
+                ForEach(sortedBooks) { book in
+                    Button(action: {
+                        openBook(book)
+                    }) {
+                            BookRow(book: book, libraryManager: libraryManager)
+                        }
+                    }
+                    .onDelete(perform: libraryManager.deleteBook)
+                }
+                .navigationTitle("My Library")
+                .navigationDestination(for: NavigationDestination.self) { destination in
+                    if case let .reader(doc, book) = destination {
+                        ReaderView(
+                            document: doc,
+                            bookID: book.id,
+                            libraryManager: libraryManager,
+                            onClose: {
+                                navigationPath = []
+                            },
+                            onOpenLibrary: {
+                                navigationPath = []
+                            }
+                        )
                     }
                 }
-                .onDelete(perform: libraryManager.deleteBook)
-            }
-            .navigationTitle("My Library")
             
             // Hidden navigation link mechanism REMOVED in favor of shared path
             
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    NavigationLink(destination: SettingsView()) {
-                        Image(systemName: "gear")
-                    }
-                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { isImporterPresented = true }) {
                         Image(systemName: "plus")
@@ -68,6 +77,7 @@ struct LibraryView: View {
                 handleImport(result: result)
             }
         }
+    }
     
     func openBook(_ book: BookMetadata) {
         let url = libraryManager.getBookURL(for: book)

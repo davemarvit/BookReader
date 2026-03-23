@@ -8,7 +8,7 @@ struct BookReaderApp: App {
 
     var body: some Scene {
         WindowGroup {
-            HomeView(libraryManager: libraryManager)
+            ContentView(libraryManager: libraryManager)
                 .environmentObject(audioController)
                 .onOpenURL { url in
                     // Handle incoming file

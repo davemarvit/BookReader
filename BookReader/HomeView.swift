@@ -67,29 +67,10 @@ struct HomeView: View {
                     
                     Spacer()
                     
-                    Button(action: {
-                        navigationPath = [.library]
-                    }) {
-                        Text("My Library")
-                            .font(.headline)
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 24)
-                            .background(Color.white.opacity(0.2))
-                            .foregroundColor(.white)
-                            .cornerRadius(20)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 20)
-                                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
-                            )
-                    }
-                    .padding(.bottom, 50)
+
                 }
                 .navigationDestination(for: NavigationDestination.self) { destination in
-                     switch destination {
-                     case .library:
-                         LibraryView(libraryManager: libraryManager, navigationPath: $navigationPath)
-                             .navigationBarBackButtonHidden(false)
-                     case .reader(let doc, let book):
+                     if case let .reader(doc, book) = destination {
                          // DEBUG
                          let _ = print("Navigating to reader: \(book.title)")
                          ReaderView(
@@ -101,8 +82,8 @@ struct HomeView: View {
                                  navigationPath = []
                              },
                              onOpenLibrary: {
-                                 // Swap to Library (Atomic)
-                                 navigationPath = [.library]
+                                 // Tab view makes this less critical, pop to home
+                                 navigationPath = []
                              }
                          )
                      }
@@ -197,10 +178,8 @@ struct HomeView: View {
             
             audioController.loadBook(text: doc.text, bookID: book.id, title: book.title, cover: coverImage, initialIndex: book.lastParagraphIndex)
             
+        }
     }
-}
-
-
 }
 
 struct LocalCoverView: View {

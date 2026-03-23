@@ -121,40 +121,19 @@ struct ReaderView: View {
                 dragProgress: $dragProgress
             )
         } // End Main VStack
-        .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .navigationBarLeading) {
-                Button(action: {
-                    // Go Home
-                    onClose?()
-                }) {
-                    Image(systemName: "house.fill")
-                        .foregroundColor(.primary)
-                }
-            }
-            
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack {
-                    // Search Button
-                    Button(action: {
-                        withAnimation {
-                            isSearching.toggle()
-                            if isSearching {
-                                isSearchFieldFocused = true
-                            }
+                // Search Button
+                Button(action: {
+                    withAnimation {
+                        isSearching.toggle()
+                        if isSearching {
+                            isSearchFieldFocused = true
                         }
-                    }) {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.primary)
                     }
-                    
-                    Button(action: {
-                        // Go Library
-                        onOpenLibrary?()
-                    }) {
-                        Image(systemName: "books.vertical.fill")
-                            .foregroundColor(.primary)
-                    }
+                }) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.primary)
                 }
             }
         }
@@ -263,6 +242,9 @@ struct ReaderTextView: View {
                             isSearchResult: searchResults.contains(index)
                         )
                         .id(index)
+                        .onTapGesture {
+                            audioController.setManualPlaybackPosition(index: index)
+                        }
                     }
                 }
                 .padding()

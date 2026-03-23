@@ -38,6 +38,7 @@ class LibraryManager: ObservableObject {
     init() {
         createDirectories()
         loadLibrary()
+        loadStarterBooks()
     }
     
     private func createDirectories() {
@@ -206,6 +207,47 @@ class LibraryManager: ObservableObject {
             books[idx].notes = notes
             saveLibrary()
             objectWillChange.send()
+        }
+    }
+    
+    // MARK: - Starter Library (First Launch Strategy)
+    
+    private func loadStarterBooks() {
+        let hasLoaded = UserDefaults.standard.bool(forKey: "hasLoadedStarterBooks")
+        if !hasLoaded {
+            Task {
+                await importStarterBook(name: "The Great Gatsby", textAsset: "Gatsby_Text", coverAsset: "Gatsby_Cover", author: "F. Scott Fitzgerald")
+                await importStarterBook(name: "The Adventures of Sherlock Holmes", textAsset: "Holmes_Text", coverAsset: "Holmes_Cover", author: "Arthur Conan Doyle")
+                await importStarterBook(name: "The Time Machine", textAsset: "TimeMachine_Text", coverAsset: "TimeMachine_Cover", author: "H.G. Wells")
+                
+                await MainActor.run {
+                    UserDefaults.standard.set(true, forKey: "hasLoadedStarterBooks")
+                }
+            }
+        }
+    }
+    
+    private func importStarterBook(name: String, textAsset: String, coverAsset: String, author: String) async {
+        guard let textDataAsset = NSDataAsset(name: textAsset) else {
+            print("Failed to load data asset: \(textAsset)")
+            return
+        }
+        
+        let tempURL = fileManager.temporaryDirectory.appendingPathComponent("\(name).txt")
+        do {
+            try textDataAsset.data.write(to: tempURL)
+        } catch {
+            print("Failed to write temp file: \(error)")
+            return
+        }
+        
+        await MainActor.run {
+            if let newBook = self.importBook(from: tempURL) {
+                if let coverImage = UIImage(named: coverAsset) {
+                    self.updateCover(for: newBook, image: coverImage)
+                }
+                self.updateAuthor(for: newBook, author: author)
+            }
         }
     }
 }
