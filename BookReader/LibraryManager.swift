@@ -2,7 +2,13 @@ import Foundation
 import Combine
 import UIKit // For UIImage (if needed in future, but distinct from SwiftUI)
 
-struct BookMetadata: Codable, Identifiable, Hashable {
+struct Chapter: Codable, Hashable, Identifiable {
+    var id = UUID()
+    let title: String
+    let paragraphIndex: Int
+}
+
+struct BookMetadata: Identifiable, Codable, Hashable {
     var id: UUID
     var title: String
     var author: String?
@@ -14,6 +20,10 @@ struct BookMetadata: Codable, Identifiable, Hashable {
     var dateAdded: Date
     var fileType: String // "pdf", "epub", "txt"
     var notes: String? // User notes
+    
+    // Chapter Architecture
+    var initialParagraphIndex: Int? = 0
+    var chapters: [Chapter]? = nil
 }
 
 class LibraryManager: ObservableObject {
@@ -104,11 +114,13 @@ class LibraryManager: ObservableObject {
             author: tempDoc?.author,
             filename: filename,
             coverFilename: coverFilename,
-            lastParagraphIndex: 0,
+            lastParagraphIndex: tempDoc?.initialParagraphIndex ?? 0,
             totalParagraphs: tempDoc?.paragraphCount ?? 0,
             lastReadDate: Date(),
             dateAdded: Date(),
-            fileType: url.pathExtension.lowercased()
+            fileType: url.pathExtension.lowercased(),
+            initialParagraphIndex: tempDoc?.initialParagraphIndex,
+            chapters: tempDoc?.chapters
         )
         
         books.insert(newBook, at: 0)

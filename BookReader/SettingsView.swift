@@ -85,12 +85,52 @@ struct SettingsView: View {
                 }
             }
             
-            Section(header: Text("Library")) {
-                Picker("Sort Order", selection: $settings.librarySortOption) {
-                    Text("Most Recent").tag("recent")
-                    Text("Title").tag("title")
-                    Text("Author").tag("author")
+            Section(header: Text("Reader Appearance")) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Font Size: \(Int(settings.readerFontSize))pt")
+                    Slider(value: $settings.readerFontSize, in: 12...36, step: 1)
                 }
+                .padding(.vertical, 4)
+                
+                Picker("Font Family", selection: $settings.readerFont) {
+                    ForEach(ReaderFont.allCases) { font in
+                        Text(font.displayName).tag(font.id)
+                    }
+                }
+                
+                Picker("Reading Theme", selection: $settings.readerTheme) {
+                    ForEach(ReaderTheme.allCases) { theme in
+                        Text(theme.displayName).tag(theme.id)
+                    }
+                }
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Preview")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    HStack(alignment: .top, spacing: 0) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(settings.currentTheme.textColor.opacity(0.6))
+                            .frame(width: 4)
+                            .padding(.vertical, 6)
+                            .padding(.trailing, 12)
+                        
+                        Text("It was a dark and stormy night; the rain fell in torrents—except at occasional intervals, when it was checked by a violent gust of wind.")
+                            .font(settings.currentFont)
+                            .foregroundColor(settings.currentTheme.textColor)
+                            .lineSpacing(6)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(settings.currentTheme.backgroundColor)
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                    )
+                }
+                .padding(.vertical, 8)
             }
             
             Section(footer: Text(apiKeyStatus)) {

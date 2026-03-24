@@ -74,6 +74,14 @@ class AudioController: NSObject, ObservableObject {
     private var appleTTSDebounceTimer: Timer?
     private var currentAppleUtterance: AVSpeechUtterance?
     
+    // Smart Options
+    private var lastPauseTime: Date? = nil
+    
+    // Sleep Timer
+    @Published var sleepTimerActive: Bool = false
+    @Published var sleepTimerRemaining: TimeInterval = 0
+    private var sleepTimer: Timer?
+    
     // Queue Management
     private var itemIndexMap: [AVPlayerItem: Int] = [:]
 
@@ -150,15 +158,29 @@ class AudioController: NSObject, ObservableObject {
             return .success
         }
         
-        // Next Track (Next Paragraph)
-        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
-            self?.skipForward()
+        // Skip Forward (Native 30s for Control Center / CarPlay)
+        commandCenter.skipForwardCommand.preferredIntervals = [30]
+        commandCenter.skipForwardCommand.addTarget { [weak self] _ in
+            self?.skip(bySeconds: 30)
             return .success
         }
         
-        // Previous Track (Prev Paragraph)
+        // Skip Backward (Native 15s for Control Center / CarPlay)
+        commandCenter.skipBackwardCommand.preferredIntervals = [15]
+        commandCenter.skipBackwardCommand.addTarget { [weak self] _ in
+            self?.skip(bySeconds: -15)
+            return .success
+        }
+        
+        // Next Track (Headphone buttons double-tap fallback)
+        commandCenter.nextTrackCommand.addTarget { [weak self] _ in
+            self?.skip(bySeconds: 30)
+            return .success
+        }
+        
+        // Previous Track (Headphone buttons triple-tap fallback)
         commandCenter.previousTrackCommand.addTarget { [weak self] _ in
-            self?.skipBackward()
+            self?.skip(bySeconds: -15)
             return .success
         }
         
@@ -212,6 +234,21 @@ class AudioController: NSObject, ObservableObject {
         // Ensure Session Active
         do { try AVAudioSession.sharedInstance().setActive(true) } catch { print("Audio Session Error: \(error)") }
         
+        // Evaluate Smart Rewind
+        if let pauseTime = lastPauseTime {
+            let pauseDuration = Date().timeIntervalSince(pauseTime)
+            if pauseDuration > 30.0 && isGoogleMode {
+                let currentSeconds = player.currentTime().seconds
+                if currentSeconds > 0 && !currentSeconds.isNaN && !currentSeconds.isInfinite {
+                    // Safe rewind boundary (3 seconds) clamped to 0
+                    let newSeconds = max(0.0, currentSeconds - 3.0)
+                    let newTime = CMTime(seconds: newSeconds, preferredTimescale: 600)
+                    player.seek(to: newTime)
+                }
+            }
+        }
+        self.lastPauseTime = nil // Consume timestamp
+        
         isSessionActive = true // User intent
         
         if isGoogleMode {
@@ -225,6 +262,8 @@ class AudioController: NSObject, ObservableObject {
         endBackgroundTask()
         isSessionActive = false
         isPlaying = false
+        
+        self.lastPauseTime = Date() // Record pause boundary
         
         player.pause()
         if localSynthesizer.isSpeaking {
@@ -257,14 +296,30 @@ class AudioController: NSObject, ObservableObject {
         currentParagraphIndex = index
     }
     
-    func skipForward(amount: Int = 1) {
-        let nextIndex = min(currentParagraphIndex + amount, paragraphs.count - 1)
-        jumpToParagraph(at: nextIndex)
-    }
-    
-    func skipBackward(amount: Int = 1) {
-        let prevIndex = max(currentParagraphIndex - amount, 0)
-        jumpToParagraph(at: prevIndex)
+    func skip(bySeconds seconds: Double) {
+        guard !paragraphs.isEmpty else { return }
+        
+        // Native approximation: 15 chars per second at 1.0x playback rate
+        let charsPerSecond = 15.0 * Double(playbackRate)
+        let targetCharsShift = Int(seconds * charsPerSecond)
+        
+        var newIndex = currentParagraphIndex
+        var shiftAccumulator = 0
+        
+        if targetCharsShift > 0 { // Forward
+            while newIndex < paragraphs.count - 1 && shiftAccumulator < targetCharsShift {
+                shiftAccumulator += paragraphs[newIndex].count
+                newIndex += 1
+            }
+        } else if targetCharsShift < 0 { // Backward
+            let targetAbsChars = abs(targetCharsShift)
+            while newIndex > 0 && shiftAccumulator < targetAbsChars {
+                newIndex -= 1
+                shiftAccumulator += paragraphs[newIndex].count
+            }
+        }
+        
+        jumpToParagraph(at: newIndex)
     }
     
     func setManualPlaybackPosition(index: Int) {
@@ -274,17 +329,34 @@ class AudioController: NSObject, ObservableObject {
             // If playing, jump immediately
             jumpToParagraph(at: index)
         } else {
-            // If paused, just move the needle and clear queue so next Play starts here
+            // If paused, clear the player entirely to break any background cascades
+            self.playbackGeneration = UUID() // Explicitly invalidate stale pre-load task returns
             currentParagraphIndex = index
+            player.pause()
             player.removeAllItems()
             itemIndexMap.removeAll()
             appleTTSDebounceTimer?.invalidate()
             currentAppleUtterance = nil
             localSynthesizer.stopSpeaking(at: .immediate)
             
-            // Background preload if Google
+            // Specifically enqueue the EXACT tapped paragraph as the root queue element. 
+            // The pipeline will insert it, naturally trigger handleCurrentItemChange, 
+            // and spin off the maintainQueue lookahead automatically behind it!
             if isGoogleMode {
-                Task { await maintainQueue(currentIndex: index) }
+                activeTask?.cancel()
+                activeTask = Task {
+                    let task = await ensureAudioTask(for: index)
+                    if let url = try? await task.value {
+                        let item = AVPlayerItem(url: url)
+                        await MainActor.run {
+                            self.itemIndexMap[item] = index
+                            if self.player.items().isEmpty {
+                                self.player.insert(item, after: nil)
+                            }
+                            // Remain paused. State is preserved.
+                        }
+                    }
+                }
             }
         }
     }
@@ -389,7 +461,6 @@ class AudioController: NSObject, ObservableObject {
         
         do {
             let currentTask = await ensureAudioTask(for: index)
-            await maintainQueue(currentIndex: index)
             
             let url = try await currentTask.value
             guard self.playbackGeneration == expectedGen else { return }
@@ -398,6 +469,8 @@ class AudioController: NSObject, ObservableObject {
             
             await MainActor.run {
                 self.itemIndexMap[item] = index
+                
+                // Directly insert into the empty player. The change in currentItem will naturally trigger the maintainQueue pipeline via the observer.
                 if self.player.items().isEmpty {
                     self.player.insert(item, after: nil)
                 }
@@ -642,6 +715,42 @@ class AudioController: NSObject, ObservableObject {
     
     var percentageString: String {
         return String(format: "%.1f%%", progress * 100)
+    }
+    
+    // MARK: - Sleep Timer
+    
+    var sleepTimerString: String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.minute, .second]
+        formatter.unitsStyle = .positional
+        formatter.zeroFormattingBehavior = .pad
+        return formatter.string(from: sleepTimerRemaining) ?? "00:00"
+    }
+    
+    func startSleepTimer(minutes: Int) {
+        cancelSleepTimer() // Clean up any existing timer
+        
+        sleepTimerRemaining = TimeInterval(minutes * 60)
+        sleepTimerActive = true
+        
+        sleepTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self = self else { return }
+            
+            if self.sleepTimerRemaining > 0 {
+                self.sleepTimerRemaining -= 1
+            } else {
+                // Time's up!
+                self.pause()
+                self.cancelSleepTimer()
+            }
+        }
+    }
+    
+    func cancelSleepTimer() {
+        sleepTimer?.invalidate()
+        sleepTimer = nil
+        sleepTimerActive = false
+        sleepTimerRemaining = 0
     }
 }
 

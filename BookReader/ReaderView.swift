@@ -5,6 +5,7 @@ struct ReaderView: View {
     let document: ParsedDocument
     let bookID: UUID
     @ObservedObject var libraryManager: LibraryManager
+    @ObservedObject var settings = SettingsManager.shared
     
     // Navigation Callbacks
     var onClose: (() -> Void)?
@@ -21,6 +22,7 @@ struct ReaderView: View {
     
     @Environment(\.presentationMode) var presentationMode
     @State private var showingControls = true
+    @State private var isShowingTOC = false
 
     // Search State
     @State private var isSearching = false
@@ -100,14 +102,20 @@ struct ReaderView: View {
                 targetScrollIndex: $targetScrollIndex
             )
             .safeAreaInset(edge: .bottom) {
-                ReaderControlsView(
-                    isDraggingSlider: $isDraggingSlider,
-                    dragProgress: $dragProgress
-                )
-                .background(.regularMaterial)
-                .overlay(Rectangle().frame(width: nil, height: 1, alignment: .top).foregroundColor(Color.gray.opacity(0.3)), alignment: .top)
+                if showingControls {
+                    ReaderControlsView(
+                        isDraggingSlider: $isDraggingSlider,
+                        dragProgress: $dragProgress,
+                        isShowingTOC: $isShowingTOC
+                    )
+                    .transition(.move(edge: .bottom))
+                    .background(settings.currentTheme.backgroundColor.opacity(0.96).ignoresSafeArea())
+                    .overlay(Rectangle().frame(width: nil, height: 1, alignment: .top).foregroundColor(settings.currentTheme.textColor.opacity(0.15)), alignment: .top)
+                }
             }
         } // End Main VStack
+        .background(settings.currentTheme.backgroundColor.edgesIgnoringSafeArea(.all))
+        .preferredColorScheme((settings.readerTheme == "dark" || settings.readerTheme == "lowContrastDark") ? .dark : (settings.readerTheme == "system" ? nil : .light))
         .onChange(of: searchText) { newValue in
             performSearch(query: newValue)
         }
@@ -126,6 +134,29 @@ struct ReaderView: View {
                         Button(action: { nextMatch() }) {
                             Image(systemName: "chevron.down")
                         }
+                    }
+                    
+                    // Sleep Timer Menu
+                    Menu {
+                        if audioController.sleepTimerActive {
+                            Button("Cancel Timer", role: .destructive) {
+                                audioController.cancelSleepTimer()
+                            }
+                            Divider()
+                        }
+                        Button("15 Minutes") { audioController.startSleepTimer(minutes: 15) }
+                        Button("30 Minutes") { audioController.startSleepTimer(minutes: 30) }
+                        Button("45 Minutes") { audioController.startSleepTimer(minutes: 45) }
+                        Button("60 Minutes") { audioController.startSleepTimer(minutes: 60) }
+                    } label: {
+                        HStack(spacing: 4) {
+                            if audioController.sleepTimerActive {
+                                Text(audioController.sleepTimerString)
+                                    .font(.caption.monospacedDigit())
+                            }
+                            Image(systemName: audioController.sleepTimerActive ? "moon.fill" : "moon")
+                        }
+                        .foregroundColor(audioController.sleepTimerActive ? .accentColor : (isSearching ? .primary : settings.currentTheme.textColor))
                     }
                     
                     // Search Button
@@ -158,11 +189,11 @@ struct ReaderView: View {
                             Button(action: { showingMetadata = true }) {
                                 Image(systemName: "info.circle")
                                     .font(.title2)
-                                    .foregroundColor(.accentColor)
+                                    .foregroundColor(settings.currentTheme.textColor)
                                     .padding()
-                                    .background(Color(UIColor.systemBackground).opacity(0.8))
+                                    .background(settings.currentTheme.backgroundColor.opacity(0.9))
                                     .clipShape(Circle())
-                                    .shadow(radius: 5)
+                                    .shadow(color: settings.currentTheme.textColor.opacity(0.2), radius: 5)
                             }
                             .padding(.bottom, 220) // Adjust based on control height
                             .padding(.trailing, 20)
@@ -171,6 +202,55 @@ struct ReaderView: View {
                 }
             }
         )
+        .sheet(isPresented: $isShowingTOC) {
+            if !document.chapters.isEmpty {
+                NavigationStack {
+                    List(document.chapters) { chapter in
+                        Button(action: {
+                            audioController.setManualPlaybackPosition(index: chapter.paragraphIndex)
+                            isShowingTOC = false
+                        }) {
+                            HStack {
+                                Text(chapter.title)
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                if audioController.currentParagraphIndex >= chapter.paragraphIndex {
+                                    Image(systemName: "checkmark")
+                                        .foregroundColor(.accentColor)
+                                        .font(.caption)
+                                }
+                            }
+                        }
+                    }
+                    .navigationTitle("Table of Contents")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") { isShowingTOC = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            } else {
+                NavigationStack {
+                    VStack(spacing: 20) {
+                        Image(systemName: "book.closed")
+                            .font(.largeTitle)
+                            .foregroundColor(.secondary)
+                        Text("No Table of Contents")
+                            .foregroundColor(.secondary)
+                    }
+                    .navigationTitle("Table of Contents")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") { isShowingTOC = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
+            }
+        }
     } // End Body
     
     func getParagraph(at index: Int) -> String {
@@ -227,7 +307,8 @@ struct ReaderView: View {
 
 struct ReaderTextView: View {
     @EnvironmentObject var audioController: AudioController
-    @ObservedObject var libraryManager: LibraryManager 
+    @ObservedObject var libraryManager: LibraryManager
+    @ObservedObject var settings = SettingsManager.shared
     
     let bookID: UUID
     let document: ParsedDocument
@@ -359,8 +440,10 @@ struct ReaderTextView: View {
 
 struct ReaderControlsView: View {
     @EnvironmentObject var audioController: AudioController
+    @ObservedObject var settings = SettingsManager.shared
     @Binding var isDraggingSlider: Bool
     @Binding var dragProgress: Double
+    @Binding var isShowingTOC: Bool
     
     var body: some View {
         VStack(spacing: 20) {
@@ -398,20 +481,20 @@ struct ReaderControlsView: View {
                          .frame(minWidth: 50, alignment: .trailing)
                 }
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(settings.currentTheme.textColor.opacity(0.7))
             }
             .padding(.horizontal)
             
             // Playback Controls
             HStack(spacing: 20) {
-                // 1 Para Back
-                Button(action: { audioController.skipBackward() }) {
-                    Image(systemName: "chevron.left").font(.title2)
+                // 30 Secs Back
+                Button(action: { audioController.skip(bySeconds: -30) }) {
+                    Image(systemName: "gobackward.30").font(.title2)
                 }
                 
-                // 5 Paras Back
-                Button(action: { audioController.skipBackward(amount: 5) }) {
-                    Image(systemName: "chevron.left.2").font(.title2)
+                // 15 Secs Back
+                Button(action: { audioController.skip(bySeconds: -15) }) {
+                    Image(systemName: "gobackward.15").font(.title2)
                 }
                 
                 Spacer()
@@ -427,37 +510,45 @@ struct ReaderControlsView: View {
                 
                 Spacer()
                 
-                // 5 Paras Forward
-                Button(action: { audioController.skipForward(amount: 5) }) {
-                    Image(systemName: "chevron.right.2").font(.title2)
+                // 15 Secs Forward
+                Button(action: { audioController.skip(bySeconds: 15) }) {
+                    Image(systemName: "goforward.15").font(.title2)
                 }
                 
-                // 1 Para Forward
-                Button(action: { audioController.skipForward() }) {
-                    Image(systemName: "chevron.right").font(.title2)
+                // 30 Secs Forward
+                Button(action: { audioController.skip(bySeconds: 30) }) {
+                    Image(systemName: "goforward.30").font(.title2)
                 }
             }
             .padding(.horizontal, 30) // Add padding to center play button visually between spacers
             
-            // Speed Control
-            HStack {
-                Image(systemName: "tortoise.fill").font(.caption)
-                Slider(value: $audioController.playbackRate, in: 0.5...4.0, step: 0.1)
-                Image(systemName: "hare.fill").font(.caption)
-                Text(String(format: "%.1fx", audioController.playbackRate))
-                    .font(.caption)
-                    .frame(width: 40)
+            // Speed Control & TOC
+            HStack(spacing: 25) {
+                Button(action: { isShowingTOC = true }) {
+                    Image(systemName: "list.bullet")
+                        .font(.title3)
+                }
+                
+                HStack {
+                    Image(systemName: "tortoise.fill").font(.caption)
+                    Slider(value: $audioController.playbackRate, in: 0.5...4.0, step: 0.1)
+                    Image(systemName: "hare.fill").font(.caption)
+                    Text(String(format: "%.1fx", audioController.playbackRate))
+                        .font(.caption)
+                        .frame(width: 40)
+                }
             }
             .padding(.horizontal)
             
         }
         .padding(.vertical, 30)
-        .background(Color(UIColor.systemBackground))
-        .shadow(radius: 10, y: -5)
+        .foregroundColor(settings.currentTheme.textColor)
+        .shadow(color: settings.currentTheme.textColor.opacity(0.1), radius: 10, y: -5)
     }
 }
 
 struct ParagraphRow: View {
+    @ObservedObject var settings = SettingsManager.shared
     let text: String
     let index: Int
     let currentIndex: Int
@@ -465,16 +556,26 @@ struct ParagraphRow: View {
     let isSearchResult: Bool
     
     var body: some View {
-        Text(highlightObject(for: text, query: searchText))
-            .font(.body)
-            .foregroundColor(.primary)
-            .padding(4)
-            .background(
-                // Priority: Current Playback = Yellow, Search Match = Gray?
-                index == currentIndex ? Color.yellow.opacity(0.3) : (isSearchResult ? Color.gray.opacity(0.2) : Color.clear)
-            )
-            .cornerRadius(4)
-            .textSelection(.enabled)
+        HStack(alignment: .top, spacing: 0) {
+            // Elegant leading vertical bar that fades in when active
+            RoundedRectangle(cornerRadius: 2)
+                .fill(settings.currentTheme.textColor.opacity(0.6))
+                .frame(width: 4)
+                .padding(.vertical, 6)
+                .padding(.trailing, 12)
+                .opacity(index == currentIndex ? 1.0 : 0.0)
+            
+            Text(highlightObject(for: text, query: searchText))
+                .font(settings.currentFont)
+                .foregroundColor(settings.currentTheme.textColor)
+                .lineSpacing(6)
+                .padding(4)
+                .background(
+                    isSearchResult ? settings.currentTheme.textColor.opacity(0.1) : Color.clear
+                )
+                .cornerRadius(4)
+                .textSelection(.enabled)
+        }
             .background(
                 GeometryReader { geo in
                     Color.clear.preference(

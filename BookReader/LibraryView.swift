@@ -17,6 +17,12 @@ struct LibraryView: View {
         self.libraryManager = libraryManager
     }
     
+    func getProgress(for book: BookMetadata) -> Double {
+        let total = Double(max(book.totalParagraphs ?? 1, 1))
+        let current = Double(book.lastParagraphIndex)
+        return min(current / total, 1.0)
+    }
+    
     var sortedBooks: [BookMetadata] {
         switch settings.librarySortOption {
         case "title":
@@ -30,6 +36,10 @@ struct LibraryView: View {
                 if a2.isEmpty { return true }
                 return a1.localizedCaseInsensitiveCompare(a2) == .orderedAscending
             }
+        case "most_read":
+            return libraryManager.books.sorted { getProgress(for: $0) > getProgress(for: $1) }
+        case "least_read":
+            return libraryManager.books.sorted { getProgress(for: $0) < getProgress(for: $1) }
         default: // "recent"
             return libraryManager.books.sorted { ($0.lastReadDate ?? $0.dateAdded) > ($1.lastReadDate ?? $1.dateAdded) }
         }
@@ -81,8 +91,22 @@ struct LibraryView: View {
             
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { isImporterPresented = true }) {
-                        Image(systemName: "plus")
+                    HStack(spacing: 16) {
+                        Menu {
+                            Picker("Sort By", selection: $settings.librarySortOption) {
+                                Text("Most Recent").tag("recent")
+                                Text("Title").tag("title")
+                                Text("Author").tag("author")
+                                Text("Most Read").tag("most_read")
+                                Text("Least Read").tag("least_read")
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.arrow.down")
+                        }
+                        
+                        Button(action: { isImporterPresented = true }) {
+                            Image(systemName: "plus")
+                        }
                     }
                 }
             }

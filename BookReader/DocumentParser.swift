@@ -9,6 +9,8 @@ struct ParsedDocument: Hashable {
     let text: String
     let paragraphCount: Int
     let coverImage: Data?
+    var initialParagraphIndex: Int = 0
+    var chapters: [Chapter] = []
     
     func hash(into hasher: inout Hasher) {
         hasher.combine(title)
@@ -52,7 +54,7 @@ class DocumentParser {
     
     // MARK: - Smart Text Cleaning
     
-    private static func smartClean(_ text: String) -> String {
+    private static func smartClean(_ text: String) -> [String] {
         // 1. Normalize line endings
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         
@@ -92,7 +94,7 @@ class DocumentParser {
             }
         }
         
-        return cleanedBlocks.joined(separator: "\n\n")
+        return cleanedBlocks
     }
     
     private static func chunkBlock(_ text: String, limit: Int = 1000) -> [String] {
@@ -169,11 +171,10 @@ class DocumentParser {
             coverData = thumbnail.jpegData(compressionQuality: 0.8)
         }
         
-        let cleanedText = smartClean(fullText)
-
-        let count = cleanedText.components(separatedBy: "\n\n").count
+        let cleanedBlocks = smartClean(fullText)
+        let cleanedText = cleanedBlocks.joined(separator: "\n\n")
         let author = pdf.documentAttributes?[PDFDocumentAttribute.authorAttribute] as? String
-        return ParsedDocument(title: title, author: author, text: cleanedText, paragraphCount: count, coverImage: coverData)
+        return ParsedDocument(title: title, author: author, text: cleanedText, paragraphCount: cleanedBlocks.count, coverImage: coverData, initialParagraphIndex: 0, chapters: [])
     }
     
      private static func parseEPUB(url: URL) -> ParsedDocument? {
@@ -201,13 +202,38 @@ class DocumentParser {
             let manifest = findManifestMap(in: opfContent)
             
             // 3. Extract text
-            var fullText = ""
+            var allCleanedBlocks: [String] = []
+            var initialParagraphIndex = 0
+            var chapters: [Chapter] = []
+            var foundStart = false
             
             for idref in spineRefs {
                 if let href = manifest[idref] {
                     let htmlURL = opfDir.appendingPathComponent(href)
                     if let htmlContent = try? String(contentsOf: htmlURL) {
-                        fullText += stripHTML(htmlContent) + "\n\n"
+                        let stripped = stripHTML(htmlContent)
+                        let blocks = smartClean(stripped)
+                        if blocks.isEmpty { continue }
+                        
+                        // Extract Chapter Heading
+                        let chapterTitle = String(blocks[0].prefix(80).trimmingCharacters(in: .whitespacesAndNewlines))
+                        if chapterTitle.count > 2 {
+                            let chapter = Chapter(title: chapterTitle, paragraphIndex: allCleanedBlocks.count)
+                            chapters.append(chapter)
+                        }
+                        
+                        // Intelligent Front Matter Skipping
+                        if !foundStart {
+                            let lower = href.lowercased()
+                            let isFrontMatter = lower.contains("title") || lower.contains("cover") || lower.contains("copy") || lower.contains("toc") || lower.contains("nav") || lower.contains("dedic") || lower.contains("ack")
+                            
+                            if !isFrontMatter {
+                                initialParagraphIndex = allCleanedBlocks.count
+                                foundStart = true
+                            }
+                        }
+                        
+                        allCleanedBlocks.append(contentsOf: blocks)
                     }
                 }
             }
@@ -234,9 +260,8 @@ class DocumentParser {
             
             try? fileManager.removeItem(at: tempDir)
             
-            let cleanedText = smartClean(fullText)
-            let count = cleanedText.components(separatedBy: "\n\n").count
-            return ParsedDocument(title: title, author: author, text: cleanedText, paragraphCount: count, coverImage: coverData)
+            let finalJoinedText = allCleanedBlocks.joined(separator: "\n\n")
+            return ParsedDocument(title: title, author: author, text: finalJoinedText, paragraphCount: allCleanedBlocks.count, coverImage: coverData, initialParagraphIndex: initialParagraphIndex, chapters: chapters)
             
         } catch {
             print("EPUB Error: \(error)")
@@ -247,10 +272,10 @@ class DocumentParser {
     
     private static func parseText(url: URL) -> ParsedDocument? {
         do {
-            let text = try String(contentsOf: url)
-            let cleanedText = smartClean(text)
-            let count = cleanedText.components(separatedBy: "\n\n").count
-            return ParsedDocument(title: url.lastPathComponent, author: nil, text: cleanedText, paragraphCount: count, coverImage: nil)
+            let text = try String(contentsOf: url, encoding: .utf8)
+            let cleanedBlocks = smartClean(text)
+            let cleanedText = cleanedBlocks.joined(separator: "\n\n")
+            return ParsedDocument(title: url.lastPathComponent, author: nil, text: cleanedText, paragraphCount: cleanedBlocks.count, coverImage: nil, initialParagraphIndex: 0, chapters: [])
         } catch {
             return nil
         }

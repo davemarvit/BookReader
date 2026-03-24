@@ -22,8 +22,30 @@ struct HelpView: View {
             }
             
             Section(header: Text("Reading & Playback")) {
-                NavigationLink(destination: TextHelpView(title: "Playback & Speed Control", content: "**Standard Controls**\nWhen you open a book by tapping it in your Library, you will see a set of playback controls at the bottom of the screen. You can play, pause, or skip forward/backward by 1 or 5 paragraphs using the chevron arrows.\n\n**Adjusting Playback Speed**\nThe playback speed speed slider is located at the very bottom of the reading view, flanked by a Tortoise (slower) and a Hare (faster) icon.\n\nSimply drag the slider to fine-tune the narrator's speed anywhere from **0.5x up to 3.0x**. Speed adjustments take effect immediately, making it easy to skim dense text or slow down for careful listening.")) {
+                NavigationLink(destination: TextHelpView(title: "Playback & Speed Control", content: "**Standard Controls**\nWhen you open a book by tapping it in your Library, you will see a set of playback controls at the bottom of the screen. You can play, pause, or skip forward/backward by 1 or 5 paragraphs using the chevron arrows.\n\n**Adjusting Playback Speed**\nThe playback speed slider is located at the very bottom of the reading view, flanked by a Tortoise (slower) and a Hare (faster) icon.\n\nSimply drag the slider to fine-tune the narrator's speed anywhere from **0.5x up to 4.0x**. Speed adjustments take effect immediately, making it easy to skim dense text or slow down for careful listening.\n\n**Lock Screen Controls**\nWhen you lock your phone, the app seamlessly broadcasts the book's cover art, title, and playback controls natively to the iOS Lock Screen so you can control it without opening the app!")) {
                     Label("Playback & Speed Control", systemImage: "play.circle.fill")
+                }
+                
+                NavigationLink(destination: TextHelpView(title: "Tap to Play", content: "You can instantly jump the audio to any point in the book simply by **tapping on the text** you want to hear.\n\nThe audio engine will immediately reposition itself and begin reading from the exact paragraph you touched. Natively synced highlighting will follow the narrator paragraph-by-paragraph as the book continues.")) {
+                    Label("Tap to Play", systemImage: "hand.tap.fill")
+                }
+                
+                NavigationLink(destination: TextHelpView(title: "Sleep Timer", content: "To fall asleep while listening without losing your place:\n\n1. Tap the **Moon** icon in the top right corner of the reader view.\n2. Select a countdown timer for 15, 30, 45, or 60 minutes.\n3. The moon icon will visually transform into a countdown clock showing the remaining minutes.\n\nWhen the timer hits zero, the audio will automatically pause and save your exact location.")) {
+                    Label("Sleep Timer", systemImage: "moon.fill")
+                }
+                
+                NavigationLink(destination: TextHelpView(title: "Smart Rewind", content: "If you pause your book to take a phone call, or disconnect from your car's Bluetooth, the app automatically stamps the exact time.\n\nWhen you resume playback after being paused for more than 30 seconds, the engine will **invisibly rewind the audio by 3 seconds**. This allows you to seamlessly hear the last few words of the previous sentence to regain your contextual footing before the new material starts!")) {
+                    Label("Smart Rewind", systemImage: "gobackward.5")
+                }
+            }
+            
+            Section(header: Text("Appearance & Navigation")) {
+                NavigationLink(destination: TextHelpView(title: "Customizing Appearance", content: "To adjust the visual layout of your book, tap the **'Aa'** icon in the top right corner of the reader view.\n\n**Themes / Backgrounds**\nYou can choose from five meticulously crafted color themes to reduce eye strain:\n- System Default\n- Light Mode\n- Dark Mode\n- Charcoal (Low-contrast dark grey)\n- Sepia (Warm, paper-like tone)\n\n**Typography**\nYou can also dynamically select your preferred typeface (System, Serif, Monospaced, or Rounded) and use the slider to increase or decrease the overall font size.")) {
+                    Label("Fonts & Themes", systemImage: "textformat.size")
+                }
+                
+                NavigationLink(destination: TextHelpView(title: "Table of Contents", content: "When you import an EPUB file, the engine algorithmically strips the boring 'Front Matter' (like Copyright notices and Dedications) so the audio naturally begins natively at Chapter 1.\n\nTo view the book's structure:\n1. Tap the **List** icon located at the bottom left of the playback controls.\n2. A native Table of Contents sheet will appear listing all extracted chapters.\n3. Tap any chapter to instantly warp the audio to that exact section of the book.")) {
+                    Label("Table of Contents", systemImage: "list.bullet")
                 }
                 
                 NavigationLink(destination: TextHelpView(title: "Searching for Text", content: "Want to find a specific word or sentence in the book?\n\n1. Tap the **Magnifying Glass (Search)** icon in the top right corner of the reader view.\n2. Type your search phrase.\n3. The app will immediately jump to the first matching paragraph and highlight the text in yellow.\n4. You can use the up and down chevron arrows next to the search bar to jump between all the matches in the document.\n5. Tap 'Done' to close the search overlay. The audiobook will automatically resume from the paragraph you searched for.")) {
