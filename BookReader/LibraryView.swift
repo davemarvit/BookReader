@@ -34,8 +34,7 @@ struct LibraryView: View {
         let filtered = searchText.isEmpty ? libraryManager.books : libraryManager.books.filter { book in
             book.title.localizedCaseInsensitiveContains(searchText) ||
             (book.author?.localizedCaseInsensitiveContains(searchText) ?? false) ||
-            (book.tags?.contains { $0.localizedCaseInsensitiveContains(searchText) } ?? false) ||
-            (book.contentPreview?.localizedCaseInsensitiveContains(searchText) ?? false)
+            (book.tags?.contains { $0.localizedCaseInsensitiveContains(searchText) } ?? false)
         }
         
         switch settings.librarySortOption {

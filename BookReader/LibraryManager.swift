@@ -28,8 +28,6 @@ struct BookMetadata: Identifiable, Codable, Hashable {
     // Extracted Document Metadata
     var summary: String? = nil
     var tags: [String]? = nil
-    // First 5,000 chars of cleaned text for fast library content search
-    var contentPreview: String? = nil
 }
 
 class LibraryManager: ObservableObject {
@@ -134,8 +132,7 @@ class LibraryManager: ObservableObject {
             initialParagraphIndex: safeInitialIdx,
             chapters: tempDoc?.chapters,
             summary: tempDoc?.summary,
-            tags: tempDoc?.tags,
-            contentPreview: tempDoc.map { String($0.text.prefix(5000)) }
+            tags: tempDoc?.tags
         )
         
         books.insert(newBook, at: 0)
