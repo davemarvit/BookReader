@@ -23,6 +23,9 @@ class AudioController: NSObject, ObservableObject {
         }
     }
     
+    // Weak reference so AudioController can self-save progress without a retain cycle
+    weak var libraryManager: LibraryManager?
+    
     @Published var currentParagraphIndex: Int = 0 {
         didSet {
             updateNowPlayingInfo()
@@ -210,9 +213,16 @@ class AudioController: NSObject, ObservableObject {
         self.currentBookID = bookID
         self.bookTitle = title
         self.coverImage = cover
-        self.paragraphs = text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        self.paragraphs = text.components(separatedBy: "\n\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         self.totalParagraphs = self.paragraphs.count
-        self.currentParagraphIndex = initialIndex
+        // If the stored index is out of range (e.g. saved with old single-line split),
+        // reset to 0 rather than clamping to the end of the book.
+        let safeIndex = (initialIndex >= 0 && initialIndex < self.paragraphs.count) ? initialIndex : 0
+        self.currentParagraphIndex = safeIndex
+        // If we had to reset (stale stored index), immediately persist the correction.
+        if safeIndex != initialIndex {
+            libraryManager?.updateProgress(for: bookID, index: safeIndex)
+        }
         
         self.audioCache.removeAll()
         self.downloadTasks.values.forEach { $0.cancel() }

@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct LibraryView: View {
     @ObservedObject var libraryManager: LibraryManager
     @ObservedObject var settings = SettingsManager.shared
+    @EnvironmentObject var audioController: AudioController
     @State private var isImporterPresented = false
     
     // Local Navigation Path
@@ -11,24 +12,37 @@ struct LibraryView: View {
     
     // Deletion State
     @State private var showingDeleteConfirmation = false
-    @State private var indexSetToDelete: IndexSet?
+    @State private var bookToDelete: UUID?
+    @State private var searchText = ""
     
     init(libraryManager: LibraryManager) {
         self.libraryManager = libraryManager
     }
     
     func getProgress(for book: BookMetadata) -> Double {
-        let total = Double(max(book.totalParagraphs ?? 1, 1))
-        let current = Double(book.lastParagraphIndex)
-        return min(current / total, 1.0)
+        // Use live controller position for the book currently loaded in the player
+        if audioController.currentBookID == book.id {
+            return audioController.progress
+        }
+        // Fall back to persisted position for all other books
+        guard let total = book.totalParagraphs, total > 0 else { return 0 }
+        let progress = Double(book.lastParagraphIndex) / Double(total)
+        return min(max(progress, 0), 1.0)
     }
     
     var sortedBooks: [BookMetadata] {
+        let filtered = searchText.isEmpty ? libraryManager.books : libraryManager.books.filter { book in
+            book.title.localizedCaseInsensitiveContains(searchText) ||
+            (book.author?.localizedCaseInsensitiveContains(searchText) ?? false) ||
+            (book.tags?.contains { $0.localizedCaseInsensitiveContains(searchText) } ?? false) ||
+            (book.contentPreview?.localizedCaseInsensitiveContains(searchText) ?? false)
+        }
+        
         switch settings.librarySortOption {
         case "title":
-            return libraryManager.books.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+            return filtered.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         case "author":
-            return libraryManager.books.sorted {
+            return filtered.sorted {
                 let a1 = $0.author ?? ""
                 let a2 = $1.author ?? ""
                 if a1.isEmpty && a2.isEmpty { return $0.title < $1.title }
@@ -37,11 +51,11 @@ struct LibraryView: View {
                 return a1.localizedCaseInsensitiveCompare(a2) == .orderedAscending
             }
         case "most_read":
-            return libraryManager.books.sorted { getProgress(for: $0) > getProgress(for: $1) }
+            return filtered.sorted { getProgress(for: $0) > getProgress(for: $1) }
         case "least_read":
-            return libraryManager.books.sorted { getProgress(for: $0) < getProgress(for: $1) }
+            return filtered.sorted { getProgress(for: $0) < getProgress(for: $1) }
         default: // "recent"
-            return libraryManager.books.sorted { ($0.lastReadDate ?? $0.dateAdded) > ($1.lastReadDate ?? $1.dateAdded) }
+            return filtered.sorted { ($0.lastReadDate ?? $0.dateAdded) > ($1.lastReadDate ?? $1.dateAdded) }
         }
     }
     
@@ -52,19 +66,24 @@ struct LibraryView: View {
                     Button(action: {
                         openBook(book)
                     }) {
-                        BookRow(book: book, libraryManager: libraryManager)
+                        BookRow(book: book, libraryManager: libraryManager, progress: getProgress(for: book))
                     }
                 }
                 .onDelete { indexSet in
-                    indexSetToDelete = indexSet
-                    showingDeleteConfirmation = true
+                    // Resolve the UUID immediately — don't store the index
+                    // since sortedBooks order differs from libraryManager.books order.
+                    if let first = indexSet.first {
+                        bookToDelete = sortedBooks[first].id
+                        showingDeleteConfirmation = true
+                    }
                 }
             }
             .navigationTitle("My Library")
+            .searchable(text: $searchText, prompt: "Search title, author, or tags")
             .confirmationDialog("Delete Book?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) {
-                    if let indexSet = indexSetToDelete {
-                        libraryManager.deleteBook(at: indexSet)
+                    if let id = bookToDelete {
+                        libraryManager.deleteBook(id: id)
                     }
                 }
                 Button("Cancel", role: .cancel) {}
@@ -148,6 +167,7 @@ struct LibraryView: View {
 struct BookRow: View {
     let book: BookMetadata
     @ObservedObject var libraryManager: LibraryManager
+    let progress: Double
     
     var body: some View {
         HStack {
@@ -184,7 +204,7 @@ struct BookRow: View {
             
             Spacer()
             
-            ProgressRing(progress: progress(for: book))
+            ProgressRing(progress: CGFloat(progress))
                 .frame(width: 30, height: 30)
                 .padding(.trailing, 8)
         }
@@ -196,12 +216,6 @@ struct BookRow: View {
             .aspectRatio(contentMode: .fit)
             .frame(width: 50, height: 75)
             .foregroundColor(.gray)
-    }
-    
-    func progress(for book: BookMetadata) -> CGFloat {
-        let total = Double(max(book.totalParagraphs ?? 1, 1))
-        let current = Double(book.lastParagraphIndex)
-        return CGFloat(min(current / total, 1.0))
     }
 }
 

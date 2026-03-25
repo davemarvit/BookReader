@@ -116,7 +116,7 @@ struct ReaderView: View {
         } // End Main VStack
         .background(settings.currentTheme.backgroundColor.edgesIgnoringSafeArea(.all))
         .preferredColorScheme((settings.readerTheme == "dark" || settings.readerTheme == "lowContrastDark") ? .dark : (settings.readerTheme == "system" ? nil : .light))
-        .onChange(of: searchText) { newValue in
+        .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
         }
         .toolbar {
@@ -342,15 +342,14 @@ struct ReaderTextView: View {
                 .padding()
             }
             .coordinateSpace(name: "ScrollView")
-            .onChange(of: targetScrollIndex) { index in
+            .onChange(of: targetScrollIndex) { _, index in
                 if let idx = index {
-                    // Scroll to the requested search result
                     withAnimation {
                          proxy.scrollTo(idx, anchor: .center)
                     }
                 }
             }
-            .onChange(of: searchResults) { results in
+            .onChange(of: searchResults) { _, results in
                 if let first = results.first {
                     withAnimation { proxy.scrollTo(first, anchor: .center) }
                 }
@@ -394,12 +393,24 @@ struct ReaderTextView: View {
                     }
                 }
             )
-            .onChange(of: audioController.currentParagraphIndex) { newIndex in
+            .onChange(of: audioController.currentParagraphIndex) { _, newIndex in
                 guard audioController.currentBookID == bookID else { return }
                 libraryManager.updateProgress(for: bookID, index: newIndex)
                 if !isDraggingSlider && !isUserScrolling {
                     withAnimation {
                         proxy.scrollTo(newIndex, anchor: .top)
+                    }
+                }
+            }
+            // Scroll to the new position when the slider is released.
+            // A brief async hop ensures seek() has finished updating currentParagraphIndex
+            // before we scroll (the @State and @Published updates race otherwise).
+            .onChange(of: isDraggingSlider) { _, dragging in
+                if !dragging && !isUserScrolling {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo(audioController.currentParagraphIndex, anchor: .top)
+                        }
                     }
                 }
             }

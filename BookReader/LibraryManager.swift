@@ -24,6 +24,12 @@ struct BookMetadata: Identifiable, Codable, Hashable {
     // Chapter Architecture
     var initialParagraphIndex: Int? = 0
     var chapters: [Chapter]? = nil
+    
+    // Extracted Document Metadata
+    var summary: String? = nil
+    var tags: [String]? = nil
+    // First 5,000 chars of cleaned text for fast library content search
+    var contentPreview: String? = nil
 }
 
 class LibraryManager: ObservableObject {
@@ -108,19 +114,28 @@ class LibraryManager: ObservableObject {
             coverFilename = coverName
         }
         
+        // Clamp initialParagraphIndex so it never reaches or exceeds paragraphCount.
+        // If the front-matter skipper over-classifies, this prevents false 100% progress.
+        let paragraphCount = tempDoc?.paragraphCount ?? 0
+        let rawInitialIdx = tempDoc?.initialParagraphIndex ?? 0
+        let safeInitialIdx = paragraphCount > 0 ? min(rawInitialIdx, max(0, paragraphCount - 1)) : 0
+        
         let newBook = BookMetadata(
             id: UUID(),
             title: title,
             author: tempDoc?.author,
             filename: filename,
             coverFilename: coverFilename,
-            lastParagraphIndex: tempDoc?.initialParagraphIndex ?? 0,
-            totalParagraphs: tempDoc?.paragraphCount ?? 0,
+            lastParagraphIndex: safeInitialIdx,
+            totalParagraphs: paragraphCount,
             lastReadDate: Date(),
             dateAdded: Date(),
             fileType: url.pathExtension.lowercased(),
-            initialParagraphIndex: tempDoc?.initialParagraphIndex,
-            chapters: tempDoc?.chapters
+            initialParagraphIndex: safeInitialIdx,
+            chapters: tempDoc?.chapters,
+            summary: tempDoc?.summary,
+            tags: tempDoc?.tags,
+            contentPreview: tempDoc.map { String($0.text.prefix(5000)) }
         )
         
         books.insert(newBook, at: 0)
@@ -144,6 +159,19 @@ class LibraryManager: ObservableObject {
             }
         }
         books.remove(atOffsets: offsets)
+        saveLibrary()
+    }
+    
+    func deleteBook(id: UUID) {
+        guard let idx = books.firstIndex(where: { $0.id == id }) else { return }
+        let book = books[idx]
+        let fileURL = booksDirectory.appendingPathComponent(book.filename)
+        try? fileManager.removeItem(at: fileURL)
+        if let cover = book.coverFilename {
+            let coverURL = booksDirectory.appendingPathComponent(cover)
+            try? fileManager.removeItem(at: coverURL)
+        }
+        books.remove(at: idx)
         saveLibrary()
     }
     
@@ -217,6 +245,15 @@ class LibraryManager: ObservableObject {
     func updateNotes(for book: BookMetadata, notes: String) {
         if let idx = books.firstIndex(where: { $0.id == book.id }) {
             books[idx].notes = notes
+            saveLibrary()
+            objectWillChange.send()
+        }
+    }
+    
+    func updateMetadataFields(for book: BookMetadata, summary: String?, tags: [String]?) {
+        if let idx = books.firstIndex(where: { $0.id == book.id }) {
+            books[idx].summary = summary
+            books[idx].tags = tags
             saveLibrary()
             objectWillChange.send()
         }

@@ -12,6 +12,9 @@ struct ParsedDocument: Hashable {
     var initialParagraphIndex: Int = 0
     var chapters: [Chapter] = []
     
+    var summary: String? = nil
+    var tags: [String]? = nil
+    
     func hash(into hasher: inout Hasher) {
         hasher.combine(title)
         hasher.combine(author)
@@ -174,7 +177,8 @@ class DocumentParser {
         let cleanedBlocks = smartClean(fullText)
         let cleanedText = cleanedBlocks.joined(separator: "\n\n")
         let author = pdf.documentAttributes?[PDFDocumentAttribute.authorAttribute] as? String
-        return ParsedDocument(title: title, author: author, text: cleanedText, paragraphCount: cleanedBlocks.count, coverImage: coverData, initialParagraphIndex: 0, chapters: [])
+        let autoTags = KeywordExtractor.extract(from: cleanedText)
+        return ParsedDocument(title: title, author: author, text: cleanedText, paragraphCount: cleanedBlocks.count, coverImage: coverData, initialParagraphIndex: 0, chapters: [], summary: nil, tags: autoTags.isEmpty ? nil : autoTags)
     }
     
      private static func parseEPUB(url: URL) -> ParsedDocument? {
@@ -215,21 +219,40 @@ class DocumentParser {
                         let blocks = smartClean(stripped)
                         if blocks.isEmpty { continue }
                         
-                        // Extract Chapter Heading
-                        let chapterTitle = String(blocks[0].prefix(80).trimmingCharacters(in: .whitespacesAndNewlines))
-                        if chapterTitle.count > 2 {
-                            let chapter = Chapter(title: chapterTitle, paragraphIndex: allCleanedBlocks.count)
-                            chapters.append(chapter)
-                        }
-                        
-                        // Intelligent Front Matter Skipping
+                        // Intelligent Front Matter Skipping (filename + content heuristics)
                         if !foundStart {
                             let lower = href.lowercased()
-                            let isFrontMatter = lower.contains("title") || lower.contains("cover") || lower.contains("copy") || lower.contains("toc") || lower.contains("nav") || lower.contains("dedic") || lower.contains("ack")
                             
-                            if !isFrontMatter {
+                            // Track 1: filename contains known front-matter keywords
+                            let nameIsFrontMatter = lower.contains("title") || lower.contains("cover") ||
+                                lower.contains("copy") || lower.contains("toc") || lower.contains("nav") ||
+                                lower.contains("dedic") || lower.contains("ack") || lower.contains("halftitle") ||
+                                lower.contains("half-title") || lower.contains("epigraph") || lower.contains("prolog")
+                            
+                            // Track 2: content heuristic — very short spine items (≤3 paragraphs,
+                            // each under 200 chars) are almost certainly cover/title/copyright pages.
+                            let isShortPage = blocks.count <= 3 && blocks.allSatisfy { $0.count < 200 }
+                            
+                            if !nameIsFrontMatter && !isShortPage {
                                 initialParagraphIndex = allCleanedBlocks.count
                                 foundStart = true
+                            }
+                        }
+                        
+                        // Only record as a chapter if it's real content (not front matter).
+                        // Prefer h2/h3 semantic headings over blocks[0] — h1 is usually the
+                        // repeating book title, not the chapter name.
+                        if foundStart {
+                            let rawHeading = extractChapterHeading(from: htmlContent)
+                            let chapterTitle: String
+                            if let heading = rawHeading, heading.count > 1 {
+                                chapterTitle = String(heading.prefix(80))
+                            } else {
+                                chapterTitle = String(blocks[0].prefix(80).trimmingCharacters(in: .whitespacesAndNewlines))
+                            }
+                            if chapterTitle.count > 1 {
+                                let chapter = Chapter(title: chapterTitle, paragraphIndex: allCleanedBlocks.count)
+                                chapters.append(chapter)
                             }
                         }
                         
@@ -238,8 +261,18 @@ class DocumentParser {
                 }
             }
             
+            // Deduplicate TOC: if any title appears in the majority of entries it's a
+            // repeating running header (book title), not a real chapter name — remove it.
+            let titleCounts = Dictionary(chapters.map { ($0.title, 1) }, uniquingKeysWith: +)
+            let maxRepeats = max(2, chapters.count / 4)   // allow up to 25% repeats
+            let deduped = chapters.filter { titleCounts[$0.title, default: 0] <= maxRepeats }
+            
             let title = findTagContent(in: opfContent, tag: "dc:title") ?? url.lastPathComponent
             let author = findTagContent(in: opfContent, tag: "dc:creator")
+            // Extract the new metadata
+            let rawSummary = findTagContent(in: opfContent, tag: "dc:description")
+            let summary = rawSummary.map { cleanSummary($0) }
+            let tags = findMultipleTagContent(in: opfContent, tag: "dc:subject")
             
             // 4. Extract Cover
             var coverData: Data? = nil
@@ -261,7 +294,15 @@ class DocumentParser {
             try? fileManager.removeItem(at: tempDir)
             
             let finalJoinedText = allCleanedBlocks.joined(separator: "\n\n")
-            return ParsedDocument(title: title, author: author, text: finalJoinedText, paragraphCount: allCleanedBlocks.count, coverImage: coverData, initialParagraphIndex: initialParagraphIndex, chapters: chapters)
+            // Use EPUB-embedded subject tags if present, otherwise extract via TF
+            let finalTags: [String]?
+            if !tags.isEmpty {
+                finalTags = tags
+            } else {
+                let autoTags = KeywordExtractor.extract(from: finalJoinedText)
+                finalTags = autoTags.isEmpty ? nil : autoTags
+            }
+            return ParsedDocument(title: title, author: author, text: finalJoinedText, paragraphCount: allCleanedBlocks.count, coverImage: coverData, initialParagraphIndex: initialParagraphIndex, chapters: deduped, summary: summary, tags: finalTags)
             
         } catch {
             print("EPUB Error: \(error)")
@@ -275,13 +316,66 @@ class DocumentParser {
             let text = try String(contentsOf: url, encoding: .utf8)
             let cleanedBlocks = smartClean(text)
             let cleanedText = cleanedBlocks.joined(separator: "\n\n")
-            return ParsedDocument(title: url.lastPathComponent, author: nil, text: cleanedText, paragraphCount: cleanedBlocks.count, coverImage: nil, initialParagraphIndex: 0, chapters: [])
+            let autoTags = KeywordExtractor.extract(from: cleanedText)
+            return ParsedDocument(title: url.lastPathComponent, author: nil, text: cleanedText, paragraphCount: cleanedBlocks.count, coverImage: nil, initialParagraphIndex: 0, chapters: [], summary: nil, tags: autoTags.isEmpty ? nil : autoTags)
         } catch {
             return nil
         }
     }
     
     // MARK: - Helpers
+    
+    /// Cleans a raw dc:description field:
+    /// - Decodes double-encoded HTML entities (&lt;p&gt; → <p>)
+    /// - Strips all remaining HTML tags
+    /// - Collapses whitespace
+    /// - Truncates to 200 words
+    private static func cleanSummary(_ raw: String) -> String {
+        var text = raw
+        
+        // Step 1: Decode double-encoded entities so &lt;p&gt; becomes <p>
+        text = text.replacingOccurrences(of: "&lt;", with: "<")
+        text = text.replacingOccurrences(of: "&gt;", with: ">")
+        text = text.replacingOccurrences(of: "&amp;", with: "&")
+        text = text.replacingOccurrences(of: "&quot;", with: "\"")
+        text = text.replacingOccurrences(of: "&apos;", with: "'")
+        text = text.replacingOccurrences(of: "&#160;", with: " ")
+        text = text.replacingOccurrences(of: "&nbsp;", with: " ")
+        
+        // Step 2: Strip all HTML tags (now that encoded ones are decoded)
+        text = text.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
+        
+        // Step 3: Collapse multiple spaces/newlines into single spaces
+        text = text.replacingOccurrences(of: "[\\s]+", with: " ", options: .regularExpression)
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Step 4: Truncate to 200 words
+        let words = text.split(separator: " ", omittingEmptySubsequences: true)
+        if words.count > 200 {
+            text = words.prefix(200).joined(separator: " ") + "…"
+        }
+        
+        return text
+    }
+    
+    /// Extracts the most semantically appropriate chapter heading from raw HTML.
+    /// Prefers h2/h3 over h1, since h1 is usually the running book title.
+    private static func extractChapterHeading(from html: String) -> String? {
+        let tags = [("h2", 0), ("h3", 0), ("h1", 0)]
+        for (tag, _) in tags {
+            let pattern = "<\(tag)[^>]*>(.*?)</\(tag)>"
+            if let raw = regexFirstMatchGroup(pattern: pattern, in: html) {
+                // Strip any nested HTML tags inside the heading
+                let clean = raw
+                    .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+                    .replacingOccurrences(of: "&nbsp;", with: " ")
+                    .replacingOccurrences(of: "&amp;", with: "&")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if clean.count > 1 { return clean }
+            }
+        }
+        return nil
+    }
     
     private static func findAttribute(in xml: String, attribute: String) -> String? {
         let pattern = "\(attribute)=\"([^\"]+)\""
@@ -290,7 +384,12 @@ class DocumentParser {
     
     private static func findTagContent(in xml: String, tag: String) -> String? {
         let pattern = "<\(tag)[^>]*>(.*?)</\(tag)>"
-        return regexFirstMatch(pattern: pattern, in: xml)
+        return regexFirstMatchGroup(pattern: pattern, in: xml)
+    }
+    
+    private static func findMultipleTagContent(in xml: String, tag: String) -> [String] {
+        let pattern = "<\(tag)[^>]*>(.*?)</\(tag)>"
+        return regexAllMatchesGroup(pattern: pattern, in: xml)
     }
     
     private static func findSpineRefs(in opf: String) -> [String] {
@@ -324,6 +423,28 @@ class DocumentParser {
         let nsString = text as NSString
         let results = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
         return results.map { nsString.substring(with: $0.range(at: 1)) }
+    }
+    
+    private static func regexFirstMatchGroup(pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { return nil }
+        let nsString = text as NSString
+        let results = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
+        if let match = results.first, match.numberOfRanges > 1 {
+            return nsString.substring(with: match.range(at: 1))
+        }
+        return nil
+    }
+    
+    private static func regexAllMatchesGroup(pattern: String, in text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { return [] }
+        let nsString = text as NSString
+        let results = regex.matches(in: text, options: [], range: NSRange(location: 0, length: nsString.length))
+        return results.compactMap {
+            if $0.numberOfRanges > 1 {
+                return nsString.substring(with: $0.range(at: 1))
+            }
+            return nil
+        }
     }
     
     private static func stripHTML(_ html: String) -> String {

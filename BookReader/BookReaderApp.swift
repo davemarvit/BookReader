@@ -2,7 +2,6 @@ import SwiftUI
 
 @main
 struct BookReaderApp: App {
-    // We need a shared LibraryManager to handle the import
     @StateObject private var libraryManager = LibraryManager()
     @StateObject private var audioController = AudioController()
 
@@ -10,8 +9,13 @@ struct BookReaderApp: App {
         WindowGroup {
             ContentView(libraryManager: libraryManager)
                 .environmentObject(audioController)
+                .onAppear {
+                    // Wire AudioController to LibraryManager so progress
+                    // saves (and the pie chart updates) from the controller
+                    // itself, regardless of which view is on screen.
+                    audioController.libraryManager = libraryManager
+                }
                 .onOpenURL { url in
-                    // Handle incoming file
                     _ = libraryManager.importBook(from: url)
                 }
         }

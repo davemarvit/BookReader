@@ -8,7 +8,7 @@ struct HelpView: View {
                     Label("Importing Books", systemImage: "square.and.arrow.down")
                 }
                 
-                NavigationLink(destination: TextHelpView(title: "Tracking Progress", content: "**Reading Progress Rings**\n\nNext to every book in your Library list, you will see a circular pie chart (progress ring). This automatically fills up as you listen or advance through the book, giving you a quick visual indicator of exactly how much of the book you have completed.\n\nYour progress is continuously saved in the background. If you leave a book and come back a week later, it will resume exactly from the sentence where you left off.")) {
+                NavigationLink(destination: TextHelpView(title: "Tracking Progress", content: "**Reading Progress Rings**\n\nNext to every book in your Library list, you will see a circular pie chart (progress ring).\n\n- For the book **currently loaded in the player**, the ring reflects the live playback position — it updates in real time as audio advances or when you drag the progress slider.\n- For all other books, the ring shows your last saved position.\n\nYour progress is continuously saved in the background. If you leave a book and come back later, it will resume exactly where you left off.")) {
                     Label("Tracking Progress", systemImage: "chart.pie.fill")
                 }
                 
@@ -16,8 +16,12 @@ struct HelpView: View {
                     Label("Reading Statistics", systemImage: "clock.fill")
                 }
                 
-                NavigationLink(destination: TextHelpView(title: "Deleting Books", content: "To remove a book from your device permanently:\n\n1. Go to the **Library** tab.\n2. Simply **swipe left** across the row of the book you wish to remove.\n3. Tap the red **Delete** button that appears.\n\n*Note: This will delete both the book file and any generated audio/metadata from your local storage. This action cannot be undone.*")) {
+                NavigationLink(destination: TextHelpView(title: "Deleting Books", content: "To remove a book from your device permanently:\n\n1. Go to the **Library** tab.\n2. **Swipe left** across the book row.\n3. Tap the red **Delete** button.\n4. Confirm in the dialog.\n\nThe book file, cover image, and all metadata are removed immediately. This action cannot be undone.")) {
                     Label("Deleting Books", systemImage: "trash.fill")
+                }
+                
+                NavigationLink(destination: TextHelpView(title: "Searching & Tags", content: "**Library Search**\n\nPull down on the Library list to reveal the search bar. Type any word to filter books by:\n- **Title**\n- **Author**\n- **Tags** (including auto-extracted keywords)\n\n**Tags & Keywords**\n\nWhen you import a book, the app automatically extracts meaningful keywords from its content using on-device natural language processing (lemmatization + term frequency). These keywords appear as tags in the Book Details screen.\n\nYou can edit, add, or remove tags at any time in Edit mode. To regenerate them — for example if you accidentally deleted some — tap the **✨ Re-extract Tags** button in Edit mode. The app will re-read the book and repopulate the tags field in the background.")) {
+                    Label("Searching & Tags", systemImage: "tag.fill")
                 }
             }
             
@@ -44,7 +48,7 @@ struct HelpView: View {
                     Label("Fonts & Themes", systemImage: "textformat.size")
                 }
                 
-                NavigationLink(destination: TextHelpView(title: "Table of Contents", content: "When you import an EPUB file, the engine algorithmically strips the boring 'Front Matter' (like Copyright notices and Dedications) so the audio naturally begins natively at Chapter 1.\n\nTo view the book's structure:\n1. Tap the **List** icon located at the bottom left of the playback controls.\n2. A native Table of Contents sheet will appear listing all extracted chapters.\n3. Tap any chapter to instantly warp the audio to that exact section of the book.")) {
+                NavigationLink(destination: TextHelpView(title: "Table of Contents", content: "When you import an EPUB file, the parser automatically detects and skips front matter (cover pages, copyright notices, dedication, table of contents pages) so the audio begins near Chapter 1.\n\nFront matter is detected two ways:\n- **Filename**: spine items containing words like 'cover', 'title', 'toc', 'copyright', etc.\n- **Content length**: very short pages (3 or fewer short lines) are treated as cover/title pages regardless of filename.\n\nTo view the book's structure:\n1. Tap the **List** icon at the bottom left of the playback controls.\n2. A Table of Contents sheet will appear with all extracted chapter names.\n3. Tap any chapter to instantly jump the audio to that section.")) {
                     Label("Table of Contents", systemImage: "list.bullet")
                 }
                 
@@ -54,7 +58,7 @@ struct HelpView: View {
             }
             
             Section(header: Text("Book Details & Covers")) {
-                NavigationLink(destination: TextHelpView(title: "Editing Book Info", content: "You can view and edit the detailed metadata (author, title, notes) of any book in your library:\n\n1. Open the book from your Library.\n2. Tap the blue **'i' (Info)** button floating near the bottom right of the reading screen. \n3. This opens the **Book Details** page.\n4. Here you can edit the Title, author, or type personal notes.\n\nAny changes are saved automatically and immediately reflected in your Library list.")) {
+                NavigationLink(destination: TextHelpView(title: "Editing Book Info", content: "You can view and edit the full metadata of any book:\n\n1. Open the book from your Library.\n2. Tap the blue **'i' (Info)** button near the bottom right of the reading screen.\n3. This opens the **Book Details** page.\n4. Tap **Edit** to unlock all fields.\n\nEditable fields include:\n- **Title & Author**\n- **Summary** — the publisher's description, extracted from the EPUB metadata\n- **Tags** — auto-extracted keywords, fully editable\n- **Notes** — your personal notes\n\nTap **Done** to save all changes. Tap **✨ Re-extract Tags** to regenerate keywords from the book content if tags are missing or were accidentally deleted.")) {
                     Label("Editing Book Info", systemImage: "info.circle.fill")
                 }
                 
