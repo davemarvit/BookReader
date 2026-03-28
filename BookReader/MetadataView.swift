@@ -40,124 +40,129 @@ struct MetadataView: View {
     @State private var coverUrlString = ""
     @State private var isDownloading = false
     
-    var body: some View {
+    var currentProgressText: String {
+        let total = book.totalParagraphs ?? 1
+        let progressIdx = book.lastParagraphIndex
+        let rawProgress = Double(progressIdx) / Double(total > 0 ? total : 1)
+        return "\(Int(rawProgress * 100))% read"
+    }
+    
+    @ViewBuilder
+    private var editCoverSection: some View {
+        if isEditing {
+            HStack(spacing: 12) {
+                Text("Change Cover")
+                    .foregroundColor(.secondary)
+                
+                Spacer()
+                
+                Button("From Photos") { showingImagePicker = true }
+                    .foregroundColor(.blue)
+                
+                Text("|")
+                    .foregroundColor(.gray.opacity(0.3))
+                
+                Button("Paste URL") { showingUrlAlert = true }
+                    .foregroundColor(.blue)
+            }
+            .font(.subheadline)
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+        }
+    }
+    
+    private var mainContent: some View {
         ScrollView {
             VStack(spacing: 20) {
-                // Cover Image (Read Only for now)
-                Button(action: {
-                    presentationMode.wrappedValue.dismiss()
-                }) {
-                    if let coverURL = libraryManager.getCoverURL(for: book) {
-                        AsyncImage(url: coverURL) { phase in
-                            switch phase {
-                            case .empty: ProgressView()
-                            case .success(let image):
-                                image.resizable().aspectRatio(contentMode: .fit)
-                            case .failure:
-                                fallbackCover
-                            @unknown default: EmptyView()
-                            }
-                        }
-                        .frame(height: 300)
-                        .cornerRadius(12)
-                        .shadow(radius: 5)
-                    } else {
-                        fallbackCover
-                    }
-                }
-                
-                VStack(spacing: 12) {
-                    HStack(spacing: 12) {
-                        Button(action: {
-                            showingImagePicker = true
-                        }) {
-                            Text("From Photos")
-                                .font(.subheadline).bold()
-                                .padding()
-                                .frame(maxWidth: .infinity)
-                                .background(Color.blue.opacity(0.1))
-                                .cornerRadius(10)
-                        }
-                        
-                        Button(action: {
-                            showingUrlAlert = true
-                        }) {
-                            Text("Paste URL")
-                                .font(.subheadline).bold()
-                                .foregroundColor(.green)
-                                .padding()
-                                .frame(maxWidth: .infinity)
-                                .background(Color.green.opacity(0.1))
-                                .cornerRadius(10)
-                        }
-                    }
-                    
-                    if isEditing {
-                        if book.coverFilename != nil {
-                            Button(action: {
-                                libraryManager.deleteCover(for: book)
-                            }) {
-                                Text("Delete Cover")
-                                    .font(.subheadline).bold()
-                                    .foregroundColor(.red)
-                                    .padding()
-                                    .frame(maxWidth: .infinity)
-                                    .background(Color.red.opacity(0.1))
-                                    .cornerRadius(10)
-                            }
-                        }
-                    }
-                }
-                .padding(.horizontal)
-                .alert("Paste Image URL", isPresented: $showingUrlAlert) {
-                    TextField("https://...", text: $coverUrlString)
-                        .keyboardType(.URL)
-                        .autocapitalization(.none)
-                    
-                    Button("Download", action: downloadCoverFromUrl)
-                    Button("Cancel", role: .cancel) { coverUrlString = "" }
-                } message: {
-                    Text("Enter a direct link to an image (JPG/PNG).")
-                }
-                
+                coverSection
+                editCoverSection
                 fieldsSection
-                
             }
             .padding()
         }
-        .navigationTitle(isEditing ? "Editing Book" : "Book Details")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: toggleEditMode) {
-                    Text(isEditing ? "Done" : "Edit")
+    }
+    
+    @ViewBuilder
+    private var overlayContent: some View {
+        if isDownloading {
+            ZStack {
+                Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                    Text("Downloading...")
+                        .font(.headline)
                 }
+                .padding(30)
+                .background(Color(UIColor.systemBackground))
+                .cornerRadius(12)
+                .shadow(radius: 20)
             }
         }
-        .overlay(
-            Group {
-                if isDownloading {
-                    Color.black.opacity(0.4).edgesIgnoringSafeArea(.all)
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                        Text("Downloading...")
-                            .font(.headline)
+    }
+    
+    var body: some View {
+        mainContent
+            .navigationTitle(isEditing ? "Editing Book" : "Book Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(action: toggleEditMode) {
+                        Text(isEditing ? "Done" : "Edit")
                     }
-                    .padding(30)
-                    .background(Color(UIColor.systemBackground))
-                    .cornerRadius(12)
-                    .shadow(radius: 20)
                 }
             }
-        )
-        .onAppear {
-            // Initialize local state
-            self.title = book.title
-            self.author = book.author ?? ""
-            self.notes = book.notes ?? ""
-            self.summary = book.summary ?? ""
-            self.tags = book.tags?.joined(separator: ", ") ?? ""
+            .alert("Paste Image URL", isPresented: $showingUrlAlert) {
+                TextField("https://...", text: $coverUrlString)
+                    .keyboardType(.URL)
+                    .autocapitalization(.none)
+                
+                Button("Download", action: downloadCoverFromUrl)
+                Button("Cancel", role: .cancel) { coverUrlString = "" }
+            } message: {
+                Text("Enter a direct link to an image (JPG/PNG).")
+            }
+            .sheet(isPresented: $showingImagePicker) {
+                ImagePicker(image: $inputImage)
+            }
+            .onChange(of: inputImage) { newImage in
+                if let image = newImage {
+                    libraryManager.updateCover(for: book, image: image)
+                }
+            }
+            .overlay(overlayContent)
+            .onAppear {
+                self.title = book.title
+                self.author = book.author ?? ""
+                self.notes = book.notes ?? ""
+                self.summary = book.summary ?? ""
+                self.tags = book.tags?.joined(separator: ", ") ?? ""
+            }
+    }
+    
+    @ViewBuilder
+    private var coverSection: some View {
+        if let coverURL = libraryManager.getCoverURL(for: book) {
+            AsyncImage(url: coverURL) { phase in
+                switch phase {
+                case .empty: ProgressView().frame(height: 300)
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .cornerRadius(6)
+                case .failure:
+                    fallbackCover
+                @unknown default: EmptyView()
+                }
+            }
+            .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
+            .padding(.bottom, 10)
+        } else {
+            fallbackCover
+                .frame(width: 200, height: 300)
+                .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
+                .padding(.bottom, 10)
         }
     }
     
@@ -174,7 +179,7 @@ struct MetadataView: View {
                 InfoRow(label: "Author", value: author.isEmpty ? "Unknown" : author)
             }
             
-            InfoRow(label: "Format", value: book.fileType.uppercased())
+            InfoRow(label: "Progress", value: currentProgressText)
             InfoRow(label: "Added", value: formatDate(book.dateAdded))
             
             Divider()
@@ -187,9 +192,16 @@ struct MetadataView: View {
                         .border(Color.gray.opacity(0.2))
                         .cornerRadius(8)
                 } else {
-                    Text(summary.isEmpty ? "No summary available." : summary)
-                        .font(.body)
-                        .foregroundColor(.secondary)
+                    if summary.isEmpty {
+                        Text("No summary available")
+                            .font(.body)
+                            .foregroundColor(.gray)
+                            .italic()
+                    } else {
+                        Text(summary)
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             
@@ -243,9 +255,16 @@ struct MetadataView: View {
                         .border(Color.gray.opacity(0.2))
                         .cornerRadius(8)
                 } else {
-                    Text(notes.isEmpty ? "No notes added." : notes)
-                        .font(.body)
-                        .foregroundColor(.secondary)
+                    if notes.isEmpty {
+                        Text("No notes added")
+                            .font(.body)
+                            .foregroundColor(.gray)
+                            .italic()
+                    } else {
+                        Text(notes)
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
         
@@ -257,9 +276,11 @@ struct MetadataView: View {
         Image(systemName: "text.book.closed.fill")
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .frame(height: 300)
+            .frame(width: 80)
+            .padding(60)
+            .background(Color.gray.opacity(0.1))
+            .cornerRadius(6)
             .foregroundColor(.gray)
-            .padding()
     }
     
     private func reExtractTags() {

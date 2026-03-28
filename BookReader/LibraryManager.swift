@@ -102,7 +102,10 @@ class LibraryManager: ObservableObject {
         
         // Parse for Metadata and Cover
         let tempDoc = DocumentParser.parse(url: destURL)
-        let title = tempDoc?.title ?? filename
+        var title = tempDoc?.title ?? filename
+        if AppConfig.shared.isMonetizationBeta {
+            title = title.replacingOccurrences(of: ".txt", with: "")
+        }
         
         var coverFilename: String? = nil
         if let coverData = tempDoc?.coverImage {
@@ -126,7 +129,7 @@ class LibraryManager: ObservableObject {
             coverFilename: coverFilename,
             lastParagraphIndex: safeInitialIdx,
             totalParagraphs: paragraphCount,
-            lastReadDate: Date(),
+            lastReadDate: nil,
             dateAdded: Date(),
             fileType: url.pathExtension.lowercased(),
             initialParagraphIndex: safeInitialIdx,

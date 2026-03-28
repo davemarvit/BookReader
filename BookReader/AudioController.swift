@@ -79,6 +79,7 @@ class AudioController: NSObject, ObservableObject {
     
     // Smart Options
     private var lastPauseTime: Date? = nil
+    private var lastVoiceID: String = ""
     
     // Sleep Timer
     @Published var sleepTimerActive: Bool = false
@@ -241,6 +242,8 @@ class AudioController: NSObject, ObservableObject {
     }
     
     func play() {
+        checkVoiceChange()
+        
         // Ensure Session Active
         do { try AVAudioSession.sharedInstance().setActive(true) } catch { print("Audio Session Error: \(error)") }
         
@@ -281,6 +284,24 @@ class AudioController: NSObject, ObservableObject {
         }
         
         updateNowPlayingInfo(playbackRate: 0.0)
+    }
+    
+    private func checkVoiceChange() {
+        let currentVoice = isGoogleMode ? SettingsManager.shared.selectedVoiceID : (SettingsManager.shared.selectedAppleVoiceID.isEmpty ? "apple-default" : SettingsManager.shared.selectedAppleVoiceID)
+        
+        if lastVoiceID.isEmpty {
+            lastVoiceID = currentVoice
+            return
+        }
+        
+        if currentVoice != lastVoiceID {
+            lastVoiceID = currentVoice
+            // Stop current playback and clear caches so the new voice loads immediately
+            self.stopEverything()
+            self.audioCache.removeAll()
+            self.downloadTasks.values.forEach { $0.cancel() }
+            self.downloadTasks.removeAll()
+        }
     }
     
     func stopEverything() {
@@ -619,9 +640,10 @@ class AudioController: NSObject, ObservableObject {
             do {
                 print("DEBUG: Fetching audio for \(index)")
                 let text = paragraphs[index]
-                let data = try await ttsClient.fetchAudio(text: text, speed: 1.0)
+                let currentVoice = SettingsManager.shared.selectedVoiceID
+                let data = try await ttsClient.fetchAudio(text: text, voiceID: currentVoice, speed: 1.0)
                 let tempDir = FileManager.default.temporaryDirectory
-                let fileURL = tempDir.appendingPathComponent("para_\(currentBookID?.uuidString ?? "temp")_\(index).mp3")
+                let fileURL = tempDir.appendingPathComponent("para_\(currentBookID?.uuidString ?? "temp")_\(index)_\(currentVoice).mp3")
                 try data.write(to: fileURL)
                 
                 await MainActor.run { endBackgroundTask() } // End immediately after fetch

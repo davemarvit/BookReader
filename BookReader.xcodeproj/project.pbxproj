@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		557231B82F766FCA00B2571E /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 557231B42F766FCA00B2571E /* ZIPFoundation */; };
 		5577B0BD2F2615070031F12B /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 5577B0BC2F2615070031F12B /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
@@ -28,12 +29,21 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		557231BD2F766FCA00B2571E /* BookReaderMonetization.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BookReaderMonetization.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		557231BF2F766FCA00B2571E /* BookReaderMonetization-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = "BookReaderMonetization-Info.plist"; path = "/Users/Dave/Projects/ReaderApp/BookReader/BookReaderMonetization-Info.plist"; sourceTree = "<absolute>"; };
 		5577B0842F260B7B0031F12B /* BookReader.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BookReader.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5577B0912F260B820031F12B /* BookReaderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BookReaderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5577B09B2F260B820031F12B /* BookReaderUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = BookReaderUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		557231BE2F766FCA00B2571E /* Exceptions for "BookReader" folder in "BookReaderMonetization" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 557231B32F766FCA00B2571E /* BookReaderMonetization */;
+		};
 		5577B0C22F2623CA0031F12B /* Exceptions for "BookReader" folder in "BookReader" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -48,6 +58,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				5577B0C22F2623CA0031F12B /* Exceptions for "BookReader" folder in "BookReader" target */,
+				557231BE2F766FCA00B2571E /* Exceptions for "BookReader" folder in "BookReaderMonetization" target */,
 			);
 			path = BookReader;
 			sourceTree = "<group>";
@@ -65,6 +76,14 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		557231B72F766FCA00B2571E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				557231B82F766FCA00B2571E /* ZIPFoundation in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5577B0812F260B7B0031F12B /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -97,6 +116,7 @@
 				5577B0942F260B820031F12B /* BookReaderTests */,
 				5577B09E2F260B820031F12B /* BookReaderUITests */,
 				5577B0BB2F2615070031F12B /* Frameworks */,
+				557231BF2F766FCA00B2571E /* BookReaderMonetization-Info.plist */,
 				5577B0852F260B7B0031F12B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -107,6 +127,7 @@
 				5577B0842F260B7B0031F12B /* BookReader.app */,
 				5577B0912F260B820031F12B /* BookReaderTests.xctest */,
 				5577B09B2F260B820031F12B /* BookReaderUITests.xctest */,
+				557231BD2F766FCA00B2571E /* BookReaderMonetization.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -121,6 +142,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		557231B32F766FCA00B2571E /* BookReaderMonetization */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 557231BA2F766FCA00B2571E /* Build configuration list for PBXNativeTarget "BookReaderMonetization" */;
+			buildPhases = (
+				557231B62F766FCA00B2571E /* Sources */,
+				557231B72F766FCA00B2571E /* Frameworks */,
+				557231B92F766FCA00B2571E /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5577B0862F260B7B0031F12B /* BookReader */,
+			);
+			name = BookReaderMonetization;
+			packageProductDependencies = (
+				557231B42F766FCA00B2571E /* ZIPFoundation */,
+			);
+			productName = BookReader;
+			productReference = 557231BD2F766FCA00B2571E /* BookReaderMonetization.app */;
+			productType = "com.apple.product-type.application";
+		};
 		5577B0832F260B7B0031F12B /* BookReader */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 5577B0A52F260B820031F12B /* Build configuration list for PBXNativeTarget "BookReader" */;
@@ -233,11 +277,19 @@
 				5577B0832F260B7B0031F12B /* BookReader */,
 				5577B0902F260B820031F12B /* BookReaderTests */,
 				5577B09A2F260B820031F12B /* BookReaderUITests */,
+				557231B32F766FCA00B2571E /* BookReaderMonetization */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		557231B92F766FCA00B2571E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5577B0822F260B7B0031F12B /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -262,6 +314,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		557231B62F766FCA00B2571E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		5577B0802F260B7B0031F12B /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -299,6 +358,66 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		557231BB2F766FCA00B2571E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconMonetization;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4H3MZNGDCC;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "BookReaderMonetization-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Beta Book Reader";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.davemarvit.BookReader.monetization;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		557231BC2F766FCA00B2571E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIconMonetization;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4H3MZNGDCC;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "BookReaderMonetization-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "Beta Book Reader";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.davemarvit.BookReader.monetization;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		5577B0A32F260B820031F12B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -547,6 +666,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		557231BA2F766FCA00B2571E /* Build configuration list for PBXNativeTarget "BookReaderMonetization" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				557231BB2F766FCA00B2571E /* Debug */,
+				557231BC2F766FCA00B2571E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		5577B07F2F260B7B0031F12B /* Build configuration list for PBXProject "BookReader" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -586,6 +714,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		557231B52F766FCA00B2571E /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.20;
+			};
+		};
 		5577B0BA2F2613C50031F12B /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
@@ -597,6 +733,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		557231B42F766FCA00B2571E /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 557231B52F766FCA00B2571E /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
 		5577B0BC2F2615070031F12B /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 5577B0BA2F2613C50031F12B /* XCRemoteSwiftPackageReference "ZIPFoundation" */;

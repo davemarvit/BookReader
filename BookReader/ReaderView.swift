@@ -414,6 +414,13 @@ struct ReaderTextView: View {
                     }
                 }
             }
+            .onChange(of: audioController.isPlaying) { _, playing in
+                if playing && !isDraggingSlider && !isUserScrolling {
+                    withAnimation {
+                        proxy.scrollTo(audioController.currentParagraphIndex, anchor: .top)
+                    }
+                }
+            }
             .onAppear {
                 if let book = libraryManager.books.first(where: { $0.id == bookID }) {
                      // Fetch Cover

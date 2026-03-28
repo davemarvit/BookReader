@@ -13,11 +13,14 @@ struct SettingsView: View {
     
     // A few curated voices for now
     let voices = [
-        "en-US-Journey-D": "Google Journey (Male)",
-        "en-US-Journey-F": "Google Journey (Female)",
-        "en-US-Neural2-A": "Google Neural A (Male)",
-        "en-US-Neural2-C": "Google Neural C (Female)",
-        "en-US-Neural2-F": "Google Neural F (Female)"
+        "en-US-Standard-A": "Google Standard A (Male, Basic)",
+        "en-US-Standard-B": "Google Standard B (Female, Basic)",
+        "en-US-Wavenet-D": "Google WaveNet D (Male, Premium)",
+        "en-US-Wavenet-F": "Google WaveNet F (Female, Premium)",
+        "en-US-Journey-D": "Google Journey D (Male, Ultra)",
+        "en-US-Journey-F": "Google Journey F (Female, Ultra)",
+        "en-US-Neural2-A": "Google Neural A (Male, Premium)",
+        "en-US-Neural2-F": "Google Neural F (Female, Premium)"
     ]
     
     var sortedVoiceKeys: [String] {

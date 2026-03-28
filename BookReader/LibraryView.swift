@@ -7,17 +7,15 @@ struct LibraryView: View {
     @EnvironmentObject var audioController: AudioController
     @State private var isImporterPresented = false
     
-    // Local Navigation Path
-    @State private var navigationPath: [NavigationDestination] = []
+    @Binding var navigationPath: [NavigationDestination]
+    
+    @AppStorage("hasSeenLibraryWelcome") private var hasSeenLibraryWelcome = false
     
     // Deletion State
     @State private var showingDeleteConfirmation = false
     @State private var bookToDelete: UUID?
     @State private var searchText = ""
     
-    init(libraryManager: LibraryManager) {
-        self.libraryManager = libraryManager
-    }
     
     func getProgress(for book: BookMetadata) -> Double {
         // Use live controller position for the book currently loaded in the player
@@ -61,22 +59,49 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             List {
-                ForEach(sortedBooks) { book in
-                    Button(action: {
-                        openBook(book)
-                    }) {
-                        BookRow(book: book, libraryManager: libraryManager, progress: getProgress(for: book))
+                if AppConfig.shared.isMonetizationBeta && !hasSeenLibraryWelcome {
+                    Section {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Welcome — Your library is ready")
+                                .font(.headline)
+                                .foregroundColor(.primary)
+                            Text("Tap any book to start listening, or tap + to add your own books.")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 8)
                     }
                 }
+                
+                ForEach(sortedBooks) { book in
+                    BookRow(
+                        book: book,
+                        libraryManager: libraryManager,
+                        progress: getProgress(for: book),
+                        onTapMain: {
+                            hideWelcomeHint()
+                            openBook(book)
+                        },
+                        onTapProgress: {
+                            hideWelcomeHint()
+                            openMetadata(book)
+                        }
+                    )
+                }
                 .onDelete { indexSet in
-                    // Resolve the UUID immediately — don't store the index
-                    // since sortedBooks order differs from libraryManager.books order.
+                    // Resolve the UUID immediately
                     if let first = indexSet.first {
                         bookToDelete = sortedBooks[first].id
                         showingDeleteConfirmation = true
                     }
                 }
             }
+            .simultaneousGesture(DragGesture().onChanged { value in
+                if abs(value.translation.height) > 10 {
+                    hideWelcomeHint()
+                }
+            })
             .navigationTitle("My Library")
             .searchable(text: $searchText, prompt: "Search title, author, or tags")
             .confirmationDialog("Delete Book?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
@@ -102,6 +127,8 @@ struct LibraryView: View {
                                 navigationPath = []
                             }
                         )
+                    } else if case let .metadata(book) = destination {
+                        MetadataView(libraryManager: libraryManager, book: book)
                     }
                 }
             
@@ -122,7 +149,10 @@ struct LibraryView: View {
                             Image(systemName: "arrow.up.arrow.down")
                         }
                         
-                        Button(action: { isImporterPresented = true }) {
+                        Button(action: { 
+                            isImporterPresented = true
+                            hideWelcomeHint()
+                        }) {
                             Image(systemName: "plus")
                         }
                     }
@@ -135,7 +165,22 @@ struct LibraryView: View {
             ) { result in
                 handleImport(result: result)
             }
+            .onAppear {
+                if AppConfig.shared.isMonetizationBeta && !hasSeenLibraryWelcome {
+                    // State automatically handles welcome banner
+                }
+            }
         }
+    }
+    
+    func hideWelcomeHint() {
+        if AppConfig.shared.isMonetizationBeta && !hasSeenLibraryWelcome {
+            hasSeenLibraryWelcome = true
+        }
+    }
+    
+    func openMetadata(_ book: BookMetadata) {
+        self.navigationPath.append(.metadata(book))
     }
     
     func openBook(_ book: BookMetadata) {
@@ -162,50 +207,60 @@ struct LibraryView: View {
     }
 }
 
-// Extracted Subview to help compiler
 struct BookRow: View {
     let book: BookMetadata
     @ObservedObject var libraryManager: LibraryManager
     let progress: Double
+    let onTapMain: () -> Void
+    let onTapProgress: () -> Void
     
     var body: some View {
         HStack {
-            // Cover Image
-            if let coverURL = libraryManager.getCoverURL(for: book) {
-                AsyncImage(url: coverURL) { phase in
-                    switch phase {
-                    case .empty:
-                        ProgressView().frame(width: 50, height: 75)
-                    case .success(let image):
-                        image.resizable().aspectRatio(contentMode: .fill).frame(width: 50, height: 75).cornerRadius(4).clipped()
-                    case .failure:
+            Button(action: onTapMain) {
+                HStack {
+                    // Cover Image
+                    if let coverURL = libraryManager.getCoverURL(for: book) {
+                        AsyncImage(url: coverURL) { phase in
+                            switch phase {
+                            case .empty:
+                                ProgressView().frame(width: 50, height: 75)
+                            case .success(let image):
+                                image.resizable().aspectRatio(contentMode: .fill).frame(width: 50, height: 75).cornerRadius(4).clipped()
+                            case .failure:
+                                fallbackCover
+                            @unknown default:
+                                EmptyView()
+                            }
+                        }
+                    } else {
                         fallbackCover
-                    @unknown default:
-                        EmptyView()
                     }
+                    
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(book.title)
+                            .font(.headline)
+                            .lineLimit(2)
+                            .foregroundColor(.primary)
+                        
+                        if let author = book.author, !author.isEmpty {
+                            Text(author)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    
+                    Spacer()
                 }
-            } else {
-                fallbackCover
+                .contentShape(Rectangle())
             }
+            .buttonStyle(PlainButtonStyle())
             
-            VStack(alignment: .leading, spacing: 4) {
-                Text(book.title)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .foregroundColor(.primary)
-                
-                if let author = book.author, !author.isEmpty {
-                    Text(author)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
+            Button(action: onTapProgress) {
+                ProgressRing(progress: CGFloat(progress))
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
-            
-            Spacer()
-            
-            ProgressRing(progress: CGFloat(progress))
-                .frame(width: 30, height: 30)
-                .padding(.trailing, 8)
+            .buttonStyle(BorderlessButtonStyle())
         }
     }
     
@@ -225,14 +280,16 @@ struct ProgressRing: View {
         ZStack {
             // Background circle outline
             Circle()
-                .stroke(lineWidth: 1)
+                .stroke(lineWidth: 2.0)
                 .opacity(0.3)
                 .foregroundColor(.blue)
+                .padding(4)
             
             // Filled slice representing progress
             if progress > 0 {
                 PieSlice(startAngle: .degrees(-90), endAngle: .degrees(-90 + Double(progress) * 360))
                     .foregroundColor(.blue)
+                    .padding(4)
             }
         }
     }

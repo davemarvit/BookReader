@@ -1,35 +1,12 @@
 import Foundation
 
-enum TTSVoice: String, CaseIterable, Identifiable {
-    case standardMale = "en-US-Standard-A"
-    case standardFemale = "en-US-Standard-B"
-    case waveNetMale = "en-US-Wavenet-D"
-    case waveNetFemale = "en-US-Wavenet-F"
-    case neural2Female = "en-US-Neural2-F"
-    case neural2Male = "en-US-Neural2-D"
-    
-    var id: String { self.rawValue }
-    
-    var displayName: String {
-        switch self {
-        case .standardMale: return "Standard Male"
-        case .standardFemale: return "Standard Female"
-        case .waveNetMale: return "WaveNet Male (Premium)"
-        case .waveNetFemale: return "WaveNet Female (Premium)"
-        case .neural2Female: return "Neural2 Female (Premium)"
-        case .neural2Male: return "Neural2 Male (Premium)"
-        }
-    }
-}
-
 class GoogleTTSClient: ObservableObject {
     private let baseURL = "https://texttospeech.googleapis.com/v1/text:synthesize"
     private let settings = SettingsManager.shared
     
-    func fetchAudio(text: String, voice: TTSVoice = .neural2Female, speed: Double = 1.0) async throws -> Data {
+    func fetchAudio(text: String, voiceID: String, speed: Double = 1.0) async throws -> Data {
         // Use Settings key, fallback to Secrets if empty
         let apiKey = settings.googleAPIKey.isEmpty ? Secrets.googleAPIKey : settings.googleAPIKey
-        let voiceID = settings.selectedVoiceID
         
         guard let url = URL(string: "\(baseURL)?key=\(apiKey)") else {
             throw URLError(.badURL)
