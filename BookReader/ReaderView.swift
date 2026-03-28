@@ -463,6 +463,8 @@ struct ReaderControlsView: View {
     @Binding var dragProgress: Double
     @Binding var isShowingTOC: Bool
     
+    @State private var wasPlayingBeforeDrag = false
+    
     var body: some View {
         VStack(spacing: 20) {
             
@@ -479,8 +481,13 @@ struct ReaderControlsView: View {
                     in: 0...1.0,
                     onEditingChanged: { editing in
                         self.isDraggingSlider = editing
-                        if !editing {
-                            self.audioController.seek(to: self.dragProgress)
+                        if editing {
+                            self.wasPlayingBeforeDrag = self.audioController.isPlaying
+                            if self.wasPlayingBeforeDrag {
+                                self.audioController.pause()
+                            }
+                        } else {
+                            self.audioController.seek(to: self.dragProgress, playAfterSeek: self.wasPlayingBeforeDrag)
                         }
                     }
                 )
@@ -518,8 +525,8 @@ struct ReaderControlsView: View {
                 Spacer()
                 
                 // Play/Pause (Centered)
-                StablePlayButton(isSessionActive: audioController.isSessionActive) {
-                    if audioController.isSessionActive {
+                StablePlayButton(isPlaying: audioController.isPlaying) {
+                    if audioController.isPlaying {
                         audioController.pause()
                     } else {
                         audioController.play()
@@ -630,11 +637,11 @@ struct ViewOffsetKey: PreferenceKey {
 // ZStack-based Button to prevent SF Symbol swapping flicker
 // MARK: - Equatable to prevent redundancy
 struct StablePlayButton: View, Equatable {
-    let isSessionActive: Bool
+    let isPlaying: Bool
     let action: () -> Void
     
     static func == (lhs: StablePlayButton, rhs: StablePlayButton) -> Bool {
-        return lhs.isSessionActive == rhs.isSessionActive
+        return lhs.isPlaying == rhs.isPlaying
     }
     
     var body: some View {
@@ -645,14 +652,14 @@ struct StablePlayButton: View, Equatable {
                     .resizable()
                     .frame(width: 60, height: 60)
                     .foregroundColor(.accentColor)
-                    .opacity(isSessionActive ? 0 : 1)
+                    .opacity(isPlaying ? 0 : 1)
                 
                 // Pause Icon
                 Image(systemName: "pause.circle.fill")
                     .resizable()
                     .frame(width: 60, height: 60)
                     .foregroundColor(.accentColor)
-                    .opacity(isSessionActive ? 1 : 0)
+                    .opacity(isPlaying ? 1 : 0)
             }
             // Use transaction to prevent parent animations from leaking in
             .transaction { transaction in

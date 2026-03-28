@@ -61,6 +61,7 @@ class AudioController: NSObject, ObservableObject {
     // MARK: - Audio Engines
     // Google TTS / Pre-recorded
     private let player = AVQueuePlayer() // Restored rock-solid 5-paragraph AVQueuePlayer
+    private var timeControlStatusObserver: NSKeyValueObservation?
     private let ttsClient = GoogleTTSClient()
     
     // Apple Local TTS
@@ -97,6 +98,16 @@ class AudioController: NSObject, ObservableObject {
         
         // Optimize for speech latency
         player.automaticallyWaitsToMinimizeStalling = false
+        
+        // Ensure single source of truth for Google playback state
+        timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                if self.isGoogleMode {
+                    self.isPlaying = (player.timeControlStatus == .playing || player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+                }
+            }
+        }
         
         // Observe AVQueuePlayer currentItem changes to auto-advance index natively
         playerItemObservation = player.observe(\.currentItem, options: [.new, .old]) { [weak self] player, change in
@@ -316,10 +327,10 @@ class AudioController: NSObject, ObservableObject {
     
     // MARK: - Navigation
     
-    func seek(to percentage: Double) {
+    func seek(to percentage: Double, playAfterSeek: Bool? = nil) {
         let newIndex = Int(Double(totalParagraphs) * percentage)
         let clampedIndex = min(max(newIndex, 0), totalParagraphs - 1)
-        jumpToParagraph(at: clampedIndex)
+        jumpToParagraph(at: clampedIndex, playAfterSeek: playAfterSeek ?? self.isPlaying)
     }
     
     func restorePosition(index: Int) {
@@ -350,7 +361,7 @@ class AudioController: NSObject, ObservableObject {
             }
         }
         
-        jumpToParagraph(at: newIndex)
+        jumpToParagraph(at: newIndex, playAfterSeek: self.isPlaying)
     }
     
     func setManualPlaybackPosition(index: Int) {
@@ -358,7 +369,7 @@ class AudioController: NSObject, ObservableObject {
         
         if isPlaying {
             // If playing, jump immediately
-            jumpToParagraph(at: index)
+            jumpToParagraph(at: index, playAfterSeek: true)
         } else {
             // If paused, clear the player entirely to break any background cascades
             self.playbackGeneration = UUID() // Explicitly invalidate stale pre-load task returns
@@ -392,7 +403,7 @@ class AudioController: NSObject, ObservableObject {
         }
     }
     
-    private func jumpToParagraph(at index: Int) {
+    private func jumpToParagraph(at index: Int, playAfterSeek: Bool) {
         self.playbackGeneration = UUID()
         player.pause()
         player.removeAllItems()
@@ -407,10 +418,12 @@ class AudioController: NSObject, ObservableObject {
         
         if isGoogleMode {
             activeTask = Task {
-                 await EnqueueAndPlay(from: index)
+                 await EnqueueAndPlay(from: index, startPlaying: playAfterSeek)
             }
         } else {
-            playLocal()
+            if playAfterSeek {
+                speakLocalParagraph(index: index)
+            }
         }
     }
     
@@ -484,7 +497,7 @@ class AudioController: NSObject, ObservableObject {
         }
     }
     
-    private func EnqueueAndPlay(from index: Int) async {
+    private func EnqueueAndPlay(from index: Int, startPlaying: Bool = true) async {
         guard index < paragraphs.count else { return }
         
         DispatchQueue.main.async { self.isLoading = true }
@@ -507,9 +520,10 @@ class AudioController: NSObject, ObservableObject {
                 }
                 
                 self.player.defaultRate = self.playbackRate
-                self.player.play()
+                if startPlaying {
+                    self.player.play()
+                }
                 self.player.rate = self.playbackRate
-                self.isPlaying = true
                 self.isLoading = false
             }
         } catch {

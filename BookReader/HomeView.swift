@@ -50,115 +50,14 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             if AppConfig.shared.isMonetizationBeta {
-                VStack {
+                ZStack {
+                    Color(UIColor.systemBackground).edgesIgnoringSafeArea(.all)
+                    
                     if let book = activeBook {
-                        // "Now Playing" layout
-                        Spacer()
-                        
-                        Button(action: { openReader(book) }) {
-                            VStack(spacing: 24) {
-                                if let coverURL = libraryManager.getCoverURL(for: book) {
-                                    LocalCoverView(coverURL: coverURL)
-                                        .id(book.id)
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(maxHeight: 350)
-                                        .shadow(radius: 10)
-                                } else {
-                                    Image("WakeUpImageMonetization")
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fit)
-                                        .frame(maxHeight: 350)
-                                        .cornerRadius(12)
-                                        .shadow(radius: 10)
-                                }
-                                
-                                VStack(spacing: 6) {
-                                    Text(book.title)
-                                        .font(.title2)
-                                        .fontWeight(.bold)
-                                        .foregroundColor(.primary)
-                                        .multilineTextAlignment(.center)
-                                        .lineLimit(2)
-                                    
-                                    if let author = book.author, !author.isEmpty {
-                                        Text(author)
-                                            .font(.title3)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        Spacer()
-                        
-                        // Progress & Play controls wrapper (does not trigger book open)
-                        VStack(spacing: 20) {
-                            let total = book.totalParagraphs ?? 1
-                            let progressIdx = audioController.currentBookID == book.id ? audioController.currentParagraphIndex : book.lastParagraphIndex
-                            let rawProgress = Double(progressIdx) / Double(total > 0 ? total : 1)
-                            let currentProgress = min(max(rawProgress, 0.0), 1.0)
-                            
-                            VStack(spacing: 8) {
-                                ProgressView(value: currentProgress)
-                                    .progressViewStyle(LinearProgressViewStyle(tint: .blue))
-                                    .padding(.horizontal, 40)
-                                
-                                HStack {
-                                    Text("\(Int(currentProgress * 100))% read")
-                                        .font(.subheadline)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            
-                            Button(action: { togglePlayback(for: book) }) {
-                                Image(systemName: playbackIconName(for: book))
-                                    .resizable()
-                                    .frame(width: 80, height: 80)
-                                    .foregroundColor(.blue)
-                            }
-                        }
-                        .padding(.bottom, 20)
-                        
+                        blurredBackground(for: book)
+                        nowPlayingContent(book: book)
                     } else {
-                        // Empty State
-                        VStack(spacing: 16) {
-                            Image(systemName: "music.note.list")
-                                .font(.system(size: 64))
-                                .foregroundColor(.white.opacity(0.7))
-                            
-                            Text("No book playing")
-                                .font(.title2)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                            
-                            Text("Choose a book from your library")
-                                .font(.subheadline)
-                                .foregroundColor(.white.opacity(0.8))
-                            
-                            Button(action: {
-                                selectedTab = 1
-                            }) {
-                                Text("Open Library")
-                                    .fontWeight(.semibold)
-                                    .padding(.horizontal, 24)
-                                    .padding(.vertical, 12)
-                                    .background(Color.blue)
-                                    .foregroundColor(.white)
-                                    .cornerRadius(8)
-                            }
-                            .padding(.top, 16)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(
-                            ZStack {
-                                Image("WakeUpImageMonetization")
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                Color.black.opacity(0.5)
-                            }
-                            .edgesIgnoringSafeArea(.all)
-                        )
+                        emptyStateContent
                     }
                 }
                 .navigationDestination(for: NavigationDestination.self) { destination in
@@ -234,14 +133,233 @@ struct HomeView: View {
                 )
             }
         }
-        }
-
+    }
     
+    @ViewBuilder
+    func nowPlayingContent(book: BookMetadata) -> some View {
+        GeometryReader { geometry in
+            let isShort = geometry.size.height < 700
+            let rawCoverHeight = geometry.size.height * 0.45
+            let coverHeight = min(max(rawCoverHeight, 220), 400)
+            
+            let total = book.totalParagraphs ?? 1
+            let progressIdx = audioController.currentBookID == book.id ? audioController.currentParagraphIndex : book.lastParagraphIndex
+            let rawProgress = Double(progressIdx) / Double(total > 0 ? total : 1)
+            let currentProgress = min(max(rawProgress, 0.0), 1.0)
+            let percentage = Int(currentProgress * 100)
+            
+            VStack(spacing: 0) {
+                Spacer(minLength: 16)
+                
+                // 1. Cover
+                Button(action: { openReader(book) }) {
+                    Group {
+                        if let coverURL = libraryManager.getCoverURL(for: book) {
+                            if coverURL.isFileURL, let uiImage = UIImage(contentsOfFile: coverURL.path) {
+                                Image(uiImage: uiImage)
+                                    .resizable()
+                                    .scaledToFit()
+                                    .cornerRadius(12)
+                            } else {
+                                AsyncImage(url: coverURL) { phase in
+                                    switch phase {
+                                    case .empty:
+                                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    case .success(let image):
+                                        image
+                                            .resizable()
+                                            .scaledToFit()
+                                            .cornerRadius(12)
+                                    case .failure:
+                                        fallbackActiveCover
+                                    @unknown default:
+                                        EmptyView()
+                                    }
+                                }
+                            }
+                        } else {
+                            fallbackActiveCover
+                        }
+                    }
+                    .frame(height: coverHeight)
+                    .shadow(color: Color.black.opacity(0.15), radius: 12, x: 0, y: 6)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                Spacer(minLength: 16)
+                
+                // 2 & 3. Title and Author
+                VStack(spacing: 6) {
+                    Text(book.title)
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .padding(.horizontal, 24)
+                    
+                    if let author = book.author, !author.isEmpty {
+                        Text(author)
+                            .font(.title3)
+                            .foregroundColor(.white.opacity(0.8))
+                            .lineLimit(1)
+                    }
+                }
+                
+                Spacer(minLength: 24)
+                
+                // 4 & 5. Progress
+                VStack(spacing: 8) {
+                    let barWidth = min(geometry.size.width * 0.7, 300)
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.white.opacity(0.3))
+                            .frame(width: barWidth, height: 6)
+                        
+                        Capsule()
+                            .fill(Color.white)
+                            .frame(width: max(0, barWidth * currentProgress), height: 6)
+                    }
+                    
+                    Text("\(percentage)% read")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.white.opacity(0.8))
+                }
+                
+                Spacer(minLength: 24)
+                
+                // 6 & 7. Play Control
+                Button(action: { togglePlayback(for: book) }) {
+                    VStack(spacing: 12) {
+                        Image(systemName: playbackIconName(for: book))
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: isShort ? 65 : 80, height: isShort ? 65 : 80)
+                            .foregroundColor(.white)
+                        
+                        Text(buttonLabel(for: book, currentProgress: currentProgress))
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                    }
+                }
+                
+                Spacer(minLength: 16)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+    }
+    
+    var fallbackActiveCover: some View {
+        Color.clear
+            .aspectRatio(2/3, contentMode: .fit)
+            .overlay(
+                Image("WakeUpImageMonetization")
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+    
+    @ViewBuilder
+    func blurredBackground(for book: BookMetadata) -> some View {
+        ZStack {
+            if let coverURL = libraryManager.getCoverURL(for: book) {
+                if coverURL.isFileURL, let uiImage = UIImage(contentsOfFile: coverURL.path) {
+                    Image(uiImage: uiImage).resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    AsyncImage(url: coverURL) { phase in
+                        if case .success(let image) = phase {
+                            image.resizable().aspectRatio(contentMode: .fill)
+                        } else {
+                            Image("WakeUpImageMonetization").resizable().aspectRatio(contentMode: .fill)
+                        }
+                    }
+                }
+            } else {
+                Image("WakeUpImageMonetization").resizable().aspectRatio(contentMode: .fill)
+            }
+        }
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+        .blur(radius: 12)
+        .overlay(Color.black.opacity(0.2))
+        .overlay(
+            LinearGradient(
+                gradient: Gradient(colors: [.clear, .black.opacity(0.3)]),
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .overlay(
+            VStack {
+                Spacer()
+                LinearGradient(
+                    gradient: Gradient(colors: [.clear, .black.opacity(0.3)]),
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 120)
+            }
+        )
+        .scaleEffect(1.15)
+        .ignoresSafeArea(.all)
+    }
+    
+    @ViewBuilder
+    var emptyStateContent: some View {
+        ZStack {
+            Image("WakeUpImageMonetization")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .edgesIgnoringSafeArea(.all)
+            
+            Color.black.opacity(0.6).edgesIgnoringSafeArea(.all)
+            
+            VStack(spacing: 16) {
+                Image(systemName: "music.note.list")
+                    .font(.system(size: 64))
+                    .foregroundColor(.white.opacity(0.8))
+                
+                Text("No book playing")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                
+                Text("Choose a book from your library")
+                    .font(.subheadline)
+                    .foregroundColor(.white.opacity(0.9))
+                
+                Button(action: {
+                    selectedTab = 1
+                }) {
+                    Text("Open Library")
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(Color.white)
+                        .foregroundColor(.black)
+                        .cornerRadius(8)
+                }
+                .padding(.top, 16)
+            }
+        }
+    }    
     func playbackIconName(for book: BookMetadata) -> String {
         if audioController.isPlaying && audioController.currentBookID == book.id {
             return "pause.circle.fill"
         } else {
             return "play.circle.fill"
+        }
+    }
+    
+    func buttonLabel(for book: BookMetadata, currentProgress: Double) -> String {
+        if audioController.isPlaying && audioController.currentBookID == book.id {
+            return "Pause"
+        } else if currentProgress > 0 {
+            return "Resume"
+        } else {
+            return "Start"
         }
     }
     

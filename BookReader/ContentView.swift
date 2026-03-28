@@ -32,6 +32,16 @@ struct ContentView: View {
         )
     }
     
+    private func updateTabBarAppearance(for tab: Int) {
+        if AppConfig.shared.isMonetizationBeta && tab == 0 {
+            // Immersive background is only on Now Playing (tab 0)
+            UITabBar.appearance().unselectedItemTintColor = UIColor(white: 1.0, alpha: 0.6)
+        } else {
+            // Revert to system default
+            UITabBar.appearance().unselectedItemTintColor = .systemGray
+        }
+    }
+    
     var body: some View {
         TabView(selection: tabSelection) {
             HomeView(libraryManager: libraryManager, selectedTab: $selectedTab, navigationPath: $homeNavigationPath)
@@ -58,6 +68,10 @@ struct ContentView: View {
             if AppConfig.shared.isMonetizationBeta && !hasSeenLibraryWelcome {
                 selectedTab = 1
             }
+            updateTabBarAppearance(for: selectedTab)
+        }
+        .onChange(of: selectedTab) { newValue in
+            updateTabBarAppearance(for: newValue)
         }
     }
 }
