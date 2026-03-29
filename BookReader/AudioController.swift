@@ -81,6 +81,7 @@ class AudioController: NSObject, ObservableObject {
     // Smart Options
     private var lastPauseTime: Date? = nil
     private var lastVoiceID: String = ""
+    private var starvationStartTime: Date? = nil
     
     // Sleep Timer
     @Published var sleepTimerActive: Bool = false
@@ -89,6 +90,9 @@ class AudioController: NSObject, ObservableObject {
     
     // Queue Management
     private var itemIndexMap: [AVPlayerItem: Int] = [:]
+    private var queueMaintenanceTask: Task<Void, Never>?
+    private var watchdogTask: Task<Void, Never>?
+    private var highestEnqueuedIndex: Int = -1
 
     override init() {
         super.init()
@@ -113,9 +117,28 @@ class AudioController: NSObject, ObservableObject {
         playerItemObservation = player.observe(\.currentItem, options: [.new, .old]) { [weak self] player, change in
             guard let self = self else { return }
             if let newItem = change.newValue as? AVPlayerItem {
+                if let oldItem = change.oldValue as? AVPlayerItem, let oldIndex = self.itemIndexMap[oldItem] {
+                    AppLogger.logEvent("PLAYBACK_FINISH", metadata: ["index": oldIndex])
+                    if let newIndex = self.itemIndexMap[newItem] {
+                        AppLogger.logEvent("ADVANCE_TO_NEXT", metadata: ["nextIndex": newIndex])
+                    }
+                }
                 self.handleCurrentItemChange(to: newItem)
             } else if change.newValue == nil && self.isGoogleMode {
+                // Ignore if it's an intentional queue clear (indicated by highestEnqueuedIndex == -1)
+                guard self.highestEnqueuedIndex != -1 else { return }
+                
                 // Queue finished?
+                AppLogger.logEvent("QUEUE_EMPTY")
+                if let oldItem = change.oldValue as? AVPlayerItem, let oldIndex = self.itemIndexMap[oldItem] {
+                    AppLogger.logEvent("PLAYBACK_FINISH", metadata: ["index": oldIndex])
+                    
+                    if self.isPlaying && oldIndex < self.paragraphs.count - 1 {
+                        let nextReq = oldIndex + 1
+                        AppLogger.logEvent("QUEUE_STARVATION_START", metadata: ["nextRequiredIndex": nextReq, "queueCount": 0])
+                        self.starvationStartTime = Date()
+                    }
+                }
                 DispatchQueue.main.async {
                     if self.currentParagraphIndex >= self.paragraphs.count - 1 {
                         self.isPlaying = false
@@ -240,6 +263,8 @@ class AudioController: NSObject, ObservableObject {
         self.downloadTasks.values.forEach { $0.cancel() }
         self.downloadTasks.removeAll()
         self.playbackGeneration = UUID()
+        self.highestEnqueuedIndex = -1
+        self.queueMaintenanceTask?.cancel()
         
         // Preload if Google
         if isGoogleMode {
@@ -253,6 +278,8 @@ class AudioController: NSObject, ObservableObject {
     }
     
     func play() {
+        print("[BookReader] TEST_LOG: play() tapped. Engine: \(isGoogleMode ? "Premium (Google)" : "Fallback (Apple)")")
+        
         checkVoiceChange()
         
         // Ensure Session Active
@@ -286,6 +313,7 @@ class AudioController: NSObject, ObservableObject {
         endBackgroundTask()
         isSessionActive = false
         isPlaying = false
+        self.watchdogTask?.cancel()
         
         self.lastPauseTime = Date() // Record pause boundary
         
@@ -317,6 +345,11 @@ class AudioController: NSObject, ObservableObject {
     
     func stopEverything() {
         self.playbackGeneration = UUID()
+        self.highestEnqueuedIndex = -1
+        self.queueMaintenanceTask?.cancel()
+        self.watchdogTask?.cancel()
+        self.downloadTasks.values.forEach { $0.cancel() }
+        self.downloadTasks.removeAll()
         pause()
         player.removeAllItems()
         itemIndexMap.removeAll()
@@ -372,7 +405,12 @@ class AudioController: NSObject, ObservableObject {
             jumpToParagraph(at: index, playAfterSeek: true)
         } else {
             // If paused, clear the player entirely to break any background cascades
+            self.downloadTasks.values.forEach { $0.cancel() }
+            self.downloadTasks.removeAll()
             self.playbackGeneration = UUID() // Explicitly invalidate stale pre-load task returns
+            self.highestEnqueuedIndex = -1
+            self.queueMaintenanceTask?.cancel()
+            self.watchdogTask?.cancel()
             currentParagraphIndex = index
             player.pause()
             player.removeAllItems()
@@ -393,6 +431,7 @@ class AudioController: NSObject, ObservableObject {
                         await MainActor.run {
                             self.itemIndexMap[item] = index
                             if self.player.items().isEmpty {
+                                self.highestEnqueuedIndex = index
                                 self.player.insert(item, after: nil)
                             }
                             // Remain paused. State is preserved.
@@ -404,7 +443,12 @@ class AudioController: NSObject, ObservableObject {
     }
     
     private func jumpToParagraph(at index: Int, playAfterSeek: Bool) {
+        self.downloadTasks.values.forEach { $0.cancel() }
+        self.downloadTasks.removeAll()
         self.playbackGeneration = UUID()
+        self.highestEnqueuedIndex = -1
+        self.queueMaintenanceTask?.cancel()
+        self.watchdogTask?.cancel()
         player.pause()
         player.removeAllItems()
         itemIndexMap.removeAll()
@@ -472,8 +516,15 @@ class AudioController: NSObject, ObservableObject {
         
         self.currentAppleUtterance = utterance
         
+        let chars = text.count
+        let words = text.split { $0.isWhitespace || $0.isNewline }.count
+        let currentSpeed = self.playbackRate
+        
+        AppLogger.logEvent("FALLBACK_TO_APPLE_TTS_START", metadata: ["index": index, "chars": chars, "words": words, "speed": currentSpeed])
+
         DispatchQueue.main.async {
             self.localSynthesizer.speak(utterance)
+            AppLogger.logEvent("FALLBACK_TO_APPLE_TTS_SUCCESS", metadata: ["index": index])
             self.isPlaying = true
             self.updateNowPlayingInfo(playbackRate: Double(self.playbackRate))
         }
@@ -516,6 +567,9 @@ class AudioController: NSObject, ObservableObject {
                 
                 // Directly insert into the empty player. The change in currentItem will naturally trigger the maintainQueue pipeline via the observer.
                 if self.player.items().isEmpty {
+                    self.highestEnqueuedIndex = index
+                    AppLogger.logEvent("AUDIO_ENQUEUED", metadata: ["index": index, "reason": "root_insertion"])
+                    AppLogger.logEvent("QUEUE_COUNT", metadata: ["count": 1])
                     self.player.insert(item, after: nil)
                 }
                 
@@ -549,18 +603,29 @@ class AudioController: NSObject, ObservableObject {
         let expectedGen = self.playbackGeneration
         for (nextIndex, task) in tasks {
             if let url = try? await task.value {
-                 guard self.playbackGeneration == expectedGen else { return }
+                 if Task.isCancelled || self.playbackGeneration != expectedGen {
+                     AppLogger.logEvent("MAINTAIN_QUEUE_CANCELLED", metadata: ["index": nextIndex])
+                     return // Abort remaining loop if stale
+                 }
+
                  let items = self.player.items()
                  let alreadyQueued = items.contains { self.itemIndexMap[$0] == nextIndex }
+                 let isMonotonicallyValid = nextIndex > self.highestEnqueuedIndex
                  
-                 if !alreadyQueued {
+                 if !alreadyQueued && isMonotonicallyValid {
                      let newItem = AVPlayerItem(url: url)
                      self.itemIndexMap[newItem] = nextIndex
+                     self.highestEnqueuedIndex = nextIndex
+                     AppLogger.logEvent("AUDIO_ENQUEUED", metadata: ["index": nextIndex, "reason": "monotonic_guard_passed"])
+
                      if let last = items.last {
                           self.player.insert(newItem, after: last)
                      } else {
                           self.player.insert(newItem, after: nil)
                      }
+                     AppLogger.logEvent("QUEUE_COUNT", metadata: ["count": self.player.items().count])
+                 } else if !alreadyQueued && !isMonotonicallyValid {
+                     AppLogger.logEvent("ENQUEUE_REJECTED", metadata: ["index": nextIndex, "highestEnqueuedIndex": self.highestEnqueuedIndex, "reason": "stale_index_chronology"])
                  }
             }
         }
@@ -568,6 +633,40 @@ class AudioController: NSObject, ObservableObject {
     
     private func handleCurrentItemChange(to item: AVPlayerItem) {
         guard let index = itemIndexMap[item] else { return }
+        
+        AppLogger.logEvent("PLAYBACK_START", metadata: ["index": index])
+        AppLogger.logEvent("QUEUE_COUNT", metadata: ["count": player.items().count])
+        
+        if let st = self.starvationStartTime {
+            let delayMs = Int(Date().timeIntervalSince(st) * 1000)
+            AppLogger.logEvent("QUEUE_STARVATION_END", metadata: ["nextRequiredIndex": index, "delayMs": delayMs])
+            self.starvationStartTime = nil
+        }
+        
+        // Watchdog Timeout Check (Non-blocking runtime stall detection)
+        self.watchdogTask?.cancel()
+        self.watchdogTask = Task { [weak self, weak item] in
+            // Give AVAsset time to load the duration asynchronously
+            let duration = try? await item?.asset.load(.duration)
+            guard !Task.isCancelled, let self = self, let item = item else { return }
+            
+            if let seconds = duration?.seconds, !seconds.isNaN, seconds > 0 {
+                let currentRate = Double(self.playbackRate)
+                let adjustedSeconds = seconds / (currentRate > 0 ? currentRate : 1.0)
+                let bufferTime = 2.0
+                let totalWaitNs = UInt64((adjustedSeconds + bufferTime) * 1_000_000_000)
+                
+                try? await Task.sleep(nanoseconds: totalWaitNs)
+                
+                guard !Task.isCancelled, self.isPlaying else { return }
+                guard let currentItem = self.player.currentItem, currentItem == item else { return }
+                // Only log if we are actually stalled trying to read data over the network natively
+                guard self.player.timeControlStatus == .waitingToPlayAtSpecifiedRate else { return }
+                
+                AppLogger.logEvent("WATCHDOG_TIMEOUT", metadata: ["index": index, "adjustedSeconds": adjustedSeconds])
+            }
+        }
+        
         DispatchQueue.main.async {
             self.currentParagraphIndex = index
             self.updateNowPlayingInfo()
@@ -575,8 +674,11 @@ class AudioController: NSObject, ObservableObject {
         }
         
         let expectedGen = self.playbackGeneration
-        Task {
+        self.queueMaintenanceTask?.cancel()
+        
+        self.queueMaintenanceTask = Task {
             guard self.playbackGeneration == expectedGen else { return }
+            AppLogger.logEvent("MAINTAIN_QUEUE_TASK_CREATED", metadata: ["triggerIndex": index])
             await maintainQueue(currentIndex: index)
         }
     }
@@ -650,19 +752,62 @@ class AudioController: NSObject, ObservableObject {
         // Wrap network call in Background Task
         startBackgroundTask()
         
+        let qCount = self.player.items().count
+        let nextReq = self.currentParagraphIndex + (self.player.currentItem != nil ? 1 : 0)
+        let bufferedAhead = max(0, qCount - (self.player.currentItem != nil ? 1 : 0))
+        let isNextReq = (index == self.currentParagraphIndex) || (index == nextReq)
+        
         let task = Task<URL, Error> {
+            let networkStartTime = Date()
+            
+            // Extract metadata cleanly before the network request
+            let text = self.paragraphs[index]
+            let chars = text.count
+            let words = text.split { $0.isWhitespace || $0.isNewline }.count
+            let sentences = max(1, text.split(whereSeparator: { ".?!".contains($0) }).count)
+            let currentSpeed = self.playbackRate
+            
             do {
                 print("DEBUG: Fetching audio for \(index)")
-                let text = paragraphs[index]
+                AppLogger.logEvent("TTS_REQUEST_START", metadata: [
+                    "index": index, 
+                    "textLength": chars, 
+                    "speed": currentSpeed,
+                    "queueCount": qCount,
+                    "nextRequiredIndex": nextReq,
+                    "bufferedAheadCount": bufferedAhead,
+                    "isNextRequired": isNextReq
+                ])
+                
                 let currentVoice = SettingsManager.shared.selectedVoiceID
-                let data = try await ttsClient.fetchAudio(text: text, voiceID: currentVoice, speed: 1.0)
+                let data = try await self.ttsClient.fetchAudio(text: text, voiceID: currentVoice, speed: 1.0)
                 let tempDir = FileManager.default.temporaryDirectory
-                let fileURL = tempDir.appendingPathComponent("para_\(currentBookID?.uuidString ?? "temp")_\(index)_\(currentVoice).mp3")
+                let fileURL = tempDir.appendingPathComponent("para_\(self.currentBookID?.uuidString ?? "temp")_\(index)_\(currentVoice).mp3")
                 try data.write(to: fileURL)
+                
+                let durationMs = Int(Date().timeIntervalSince(networkStartTime) * 1000)
+                AppLogger.logEvent("TTS_REQUEST_SUCCESS", metadata: ["index": index, "durationMs": durationMs, "audioSize": data.count])
+                
+                // Stable structured metric log
+                print("[BookReader][TTS_METRIC] index=\(index) chars=\(chars) words=\(words) sentences=\(sentences) speed=\(currentSpeed) durationMs=\(durationMs) audioBytes=\(data.count) success=true isNextRequired=\(isNextReq) queueCount=\(qCount) nextRequiredIndex=\(nextReq) bufferedAheadCount=\(bufferedAhead)")
                 
                 await MainActor.run { endBackgroundTask() } // End immediately after fetch
                 return fileURL
             } catch {
+                let durationMs = Int(Date().timeIntervalSince(networkStartTime) * 1000)
+                let nsError = error as NSError
+                
+                AppLogger.logEvent("TTS_REQUEST_FAILED", metadata: [
+                    "index": index,
+                    "domain": nsError.domain,
+                    "code": nsError.code,
+                    "description": nsError.localizedDescription,
+                    "durationMs": durationMs
+                ])
+                
+                // Stable structured metric log for failures
+                print("[BookReader][TTS_METRIC] index=\(index) chars=\(chars) words=\(words) sentences=\(sentences) speed=\(currentSpeed) durationMs=\(durationMs) success=false errorDomain=\(nsError.domain) errorCode=\(nsError.code) isNextRequired=\(isNextReq) queueCount=\(qCount) nextRequiredIndex=\(nextReq) bufferedAheadCount=\(bufferedAhead)")
+
                 await MainActor.run { endBackgroundTask() }
                 throw error
             }
