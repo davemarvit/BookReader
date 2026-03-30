@@ -48,7 +48,7 @@ struct HomeView: View {
     }
     
     var body: some View {
-        NavigationStack(path: $navigationPath) {
+        Group {
             if AppConfig.shared.isMonetizationBeta {
                 ZStack {
                     Color(UIColor.systemBackground).edgesIgnoringSafeArea(.all)
@@ -486,4 +486,3 @@ struct LocalCoverView: View {
         }
     }
 }
-

@@ -17,6 +17,7 @@ struct ReaderView: View {
     // Scroll state
     @State private var isUserScrolling = false
     @State private var showingMetadata = false
+    @State private var showingVoiceModeSheet = false
     // Prevent initial scroll layout from resetting position
     @State private var isInitialLoad = true
     
@@ -102,16 +103,38 @@ struct ReaderView: View {
                 targetScrollIndex: $targetScrollIndex
             )
             .safeAreaInset(edge: .bottom) {
-                if showingControls {
-                    ReaderControlsView(
-                        isDraggingSlider: $isDraggingSlider,
-                        dragProgress: $dragProgress,
-                        isShowingTOC: $isShowingTOC
-                    )
-                    .transition(.move(edge: .bottom))
-                    .background(settings.currentTheme.backgroundColor.opacity(0.96).ignoresSafeArea())
-                    .overlay(Rectangle().frame(width: nil, height: 1, alignment: .top).foregroundColor(settings.currentTheme.textColor.opacity(0.15)), alignment: .top)
+                VStack(spacing: 8) {
+                    if audioController.isLoading {
+                        HStack(spacing: 4) {
+                            Text("Preparing premium audio")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            AnimatedEllipsisView()
+                        }
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 16)
+                        .background(Color(UIColor.secondarySystemBackground).opacity(0.85))
+                        .cornerRadius(12)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                    
+                    if showingControls {
+                        ReaderControlsView(
+                            isDraggingSlider: $isDraggingSlider,
+                            dragProgress: $dragProgress,
+                            isShowingTOC: $isShowingTOC
+                        )
+                        .transition(.move(edge: .bottom))
+                        .background(settings.currentTheme.backgroundColor.opacity(0.96).ignoresSafeArea())
+                        .overlay(
+                            Rectangle()
+                                .frame(width: nil, height: 1, alignment: .top)
+                                .foregroundColor(settings.currentTheme.textColor.opacity(0.15)),
+                            alignment: .top
+                        )
+                    }
                 }
+                .animation(.easeInOut(duration: 0.2), value: audioController.isLoading)
             }
         } // End Main VStack
         .background(settings.currentTheme.backgroundColor.edgesIgnoringSafeArea(.all))
@@ -120,6 +143,18 @@ struct ReaderView: View {
             performSearch(query: newValue)
         }
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Button(action: { showingVoiceModeSheet = true }) {
+                    Text(voiceModeLabel)
+                        .font(.caption)
+                        .bold()
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.secondary.opacity(0.2))
+                        .cornerRadius(8)
+                }
+                .foregroundColor(settings.currentTheme.textColor)
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 16) {
                     if isSearching && !searchResults.isEmpty {
@@ -153,7 +188,7 @@ struct ReaderView: View {
                             if audioController.sleepTimerActive {
                                 Text(audioController.sleepTimerString)
                                     .font(.caption.monospacedDigit())
-                            }
+                                }
                             Image(systemName: audioController.sleepTimerActive ? "moon.fill" : "moon")
                         }
                         .foregroundColor(audioController.sleepTimerActive ? .accentColor : (isSearching ? .primary : settings.currentTheme.textColor))
@@ -251,7 +286,62 @@ struct ReaderView: View {
                 .presentationDetents([.medium])
             }
         }
+        .sheet(isPresented: $showingVoiceModeSheet) {
+            NavigationView {
+                VStack(spacing: 20) {
+                    Text(voiceModeLabel)
+                        .font(.headline)
+                        .padding(.top)
+
+                    if audioController.voiceModeController.activeMode == .premium && settings.hasValidGoogleKey {
+                        Button("Switch to Standard") {
+                            audioController.errorMessage = nil
+                            settings.preferredEngine = "apple"
+                            audioController.voiceModeController.requestModeSwitch(.standard, isPlaying: audioController.isPlaying)
+                            showingVoiceModeSheet = false
+                        }
+                        .buttonStyle(.bordered)
+                    } else if settings.hasValidGoogleKey {
+                        Button("Switch to Premium") {
+                            audioController.errorMessage = nil
+                            settings.preferredEngine = "google"
+                            audioController.voiceModeController.requestModeSwitch(.premium, isPlaying: audioController.isPlaying)
+                            showingVoiceModeSheet = false
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    
+                    Spacer()
+                }
+                .navigationTitle("Voice Mode")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { showingVoiceModeSheet = false }
+                    }
+                }
+            }
+            .presentationDetents([.fraction(0.35), .medium])
+        }
     } // End Body
+    
+    var voiceModeLabel: String {
+        let isPremiumMode = audioController.voiceModeController.activeMode == .premium
+        let hasKey = settings.hasValidGoogleKey
+        let isUnavailable = audioController.voiceModeController.isPremiumTemporarilyUnavailable
+        
+        if isPremiumMode && hasKey && !isUnavailable {
+            return "Premium Audio"
+        } else if hasKey {
+            if isUnavailable {
+                return "Standard Audio · Premium Unavailable"
+            } else {
+                return "Standard Audio · Premium Available"
+            }
+        } else {
+            return "Standard Audio"
+        }
+    }
     
     func getParagraph(at index: Int) -> String {
         return audioController.paragraphs[index]
@@ -341,7 +431,6 @@ struct ReaderTextView: View {
                 }
                 .padding()
             }
-            .coordinateSpace(name: "ScrollView")
             .onChange(of: targetScrollIndex) { _, index in
                 if let idx = index {
                     withAnimation {
@@ -354,102 +443,37 @@ struct ReaderTextView: View {
                     withAnimation { proxy.scrollTo(first, anchor: .center) }
                 }
             }
-            // Logic to scroll when 'currentSearchMatchIndex' changes in parent is tricky without binding.
-            // WORKAROUND: We can expose a Binding<Int?> for 'scrollToRequest' from parent.
-            // BUT, for now, let's just make the parent 'jump' the audio? 
-            // No, user might want to find without losing spot.
-            // Let's rely on the user scrolling OR simple highlighting. 
-            // Actually, to make Next/Prev work, we really need the proxy.
-            // Let's add specific logic to ReaderTextView to handle external scroll requests?
-            // Simpler: Just rely on 'audioController' for NOW? No, that changes playback.
-            
-            // Let's add @Binding var requestedScrollIndex: Int?
-            
-            // For now, I'll stick to updating the view to support highlighting first.
-            
-            .onPreferenceChange(ViewOffsetKey.self) { offsets in
-                if isInitialLoad { return }
-                
-                if isUserScrolling {
-                    let sorted = offsets.map { (key: $0.key, val: $0.value) }.sorted { $0.val < $1.val }
-                    
-                    if let topNode = sorted.first(where: { $0.val >= 0 }) {
-                         let index = topNode.key
-                         
-                         if index != audioController.currentParagraphIndex {
-                             if !audioController.isSessionActive {
-                                 audioController.restorePosition(index: index)
-                             }
-                         }
-                    }
-                }
-            }
-            .simultaneousGesture(
-                DragGesture().onChanged { _ in
-                    isUserScrolling = true
-                }.onEnded { _ in
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        self.isUserScrolling = false
-                    }
-                }
-            )
             .onChange(of: audioController.currentParagraphIndex) { _, newIndex in
                 guard audioController.currentBookID == bookID else { return }
                 libraryManager.updateProgress(for: bookID, index: newIndex)
-                if !isDraggingSlider && !isUserScrolling {
-                    withAnimation {
-                        proxy.scrollTo(newIndex, anchor: .top)
-                    }
-                }
-            }
-            // Scroll to the new position when the slider is released.
-            // A brief async hop ensures seek() has finished updating currentParagraphIndex
-            // before we scroll (the @State and @Published updates race otherwise).
-            .onChange(of: isDraggingSlider) { _, dragging in
-                if !dragging && !isUserScrolling {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        withAnimation(.easeInOut(duration: 0.3)) {
-                            proxy.scrollTo(audioController.currentParagraphIndex, anchor: .top)
-                        }
-                    }
-                }
-            }
-            .onChange(of: audioController.isPlaying) { _, playing in
-                if playing && !isDraggingSlider && !isUserScrolling {
-                    withAnimation {
-                        proxy.scrollTo(audioController.currentParagraphIndex, anchor: .top)
-                    }
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    proxy.scrollTo(newIndex, anchor: .center)
                 }
             }
             .onAppear {
+                print("ReaderTextView minimal body active")
                 if let book = libraryManager.books.first(where: { $0.id == bookID }) {
-                     // Fetch Cover
-                     var coverImage: UIImage? = nil
-                     if let coverURL = libraryManager.getCoverURL(for: book),
-                        let data = try? Data(contentsOf: coverURL) {
-                         coverImage = UIImage(data: data)
-                     }
-                     
-                     audioController.loadBook(text: document.text, bookID: bookID, title: book.title, cover: coverImage, initialIndex: book.lastParagraphIndex)
-                     
-                     if audioController.currentBookID == bookID {
-                          // Increased delay to ensure Layout is ready for scrollTo
-                          DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                              if !audioController.isSessionActive {
-                                  var transaction = Transaction()
-                                  transaction.disablesAnimations = true
-                                  withTransaction(transaction) {
-                                      proxy.scrollTo(audioController.currentParagraphIndex, anchor: .top)
-                                  }
-                              }
-                          }
-                     }
+                    // Fetch Cover
+                    var coverImage: UIImage? = nil
+                    if let coverURL = libraryManager.getCoverURL(for: book),
+                       let data = try? Data(contentsOf: coverURL) {
+                        coverImage = UIImage(data: data)
+                    }
+                    
+                    audioController.loadBook(
+                        text: document.text,
+                        bookID: bookID,
+                        title: book.title,
+                        cover: coverImage,
+                        initialIndex: book.lastParagraphIndex
+                    )
                 } else {
-                     audioController.loadBook(text: document.text, bookID: bookID, title: document.title, cover: nil)
-                }
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                    self.isInitialLoad = false
+                    audioController.loadBook(
+                        text: document.text,
+                        bookID: bookID,
+                        title: document.title,
+                        cover: nil
+                    )
                 }
             }
         }
@@ -666,5 +690,19 @@ struct StablePlayButton: View, Equatable {
                 transaction.animation = nil
             }
         }
+    }
+}
+struct AnimatedEllipsisView: View {
+    @State private var dotCount = 0
+    let timer = Timer.publish(every: 0.15, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        Text(String(repeating: ".", count: dotCount))
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .frame(width: 15, alignment: .leading)
+            .onReceive(timer) { _ in
+                dotCount = (dotCount + 1) % 4
+            }
     }
 }

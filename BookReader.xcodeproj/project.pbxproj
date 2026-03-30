@@ -7,8 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		557231B82F766FCA00B2571E /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 557231B42F766FCA00B2571E /* ZIPFoundation */; };
-		5577B0BD2F2615070031F12B /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 5577B0BC2F2615070031F12B /* ZIPFoundation */; };
+		55FB40282F78E7BF00B31D89 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 557231B42F766FCA00B2571E /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -80,7 +79,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				557231B82F766FCA00B2571E /* ZIPFoundation in Frameworks */,
+				55FB40282F78E7BF00B31D89 /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -88,7 +87,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				5577B0BD2F2615070031F12B /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -182,7 +180,6 @@
 			);
 			name = BookReader;
 			packageProductDependencies = (
-				5577B0BC2F2615070031F12B /* ZIPFoundation */,
 			);
 			productName = BookReader;
 			productReference = 5577B0842F260B7B0031F12B /* BookReader.app */;
@@ -267,7 +264,7 @@
 			mainGroup = 5577B07B2F260B7B0031F12B;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				5577B0BA2F2613C50031F12B /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+				55FB40802F78E7D100B31D89 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5577B0852F260B7B0031F12B /* Products */;
@@ -726,7 +723,7 @@
 				minimumVersion = 0.9.20;
 			};
 		};
-		5577B0BA2F2613C50031F12B /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+		55FB40802F78E7D100B31D89 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
 			requirement = {
@@ -740,11 +737,6 @@
 		557231B42F766FCA00B2571E /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 557231B52F766FCA00B2571E /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
-			productName = ZIPFoundation;
-		};
-		5577B0BC2F2615070031F12B /* ZIPFoundation */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 5577B0BA2F2613C50031F12B /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
 		};
 /* End XCSwiftPackageProductDependency section */

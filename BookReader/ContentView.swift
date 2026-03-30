@@ -21,13 +21,19 @@ struct ContentView: View {
         Binding(
             get: { self.selectedTab },
             set: { newValue in
-                // If the user taps a tab, always reset it to root
-                if newValue == 0 {
-                    homeNavigationPath = []
-                } else if newValue == 1 {
-                    libraryNavigationPath = []
+                print("ContentView tabSelection set: old=\(self.selectedTab) new=\(newValue)")
+                // Only reset the path if tapping the ALREADY active tab (tap-to-root)
+                if newValue == self.selectedTab {
+                    if newValue == 0 {
+                        print("ContentView clearing homeNavigationPath")
+                        homeNavigationPath = []
+                    } else if newValue == 1 {
+                        print("ContentView clearing libraryNavigationPath")
+                        libraryNavigationPath = []
+                    }
                 }
                 self.selectedTab = newValue
+                print("ContentView tabSelection end: selectedTab=\(self.selectedTab) homePathCount=\(homeNavigationPath.count) libraryPathCount=\(libraryNavigationPath.count)")
             }
         )
     }
@@ -44,17 +50,21 @@ struct ContentView: View {
     
     var body: some View {
         TabView(selection: tabSelection) {
-            HomeView(libraryManager: libraryManager, selectedTab: $selectedTab, navigationPath: $homeNavigationPath)
-                .tabItem {
-                    Label("Now Playing", systemImage: "play.circle.fill")
-                }
-                .tag(0)
+            NavigationStack(path: $homeNavigationPath) {
+                HomeView(libraryManager: libraryManager, selectedTab: $selectedTab, navigationPath: $homeNavigationPath)
+            }
+            .tabItem {
+                Label("Now Playing", systemImage: "play.circle.fill")
+            }
+            .tag(0)
             
-            LibraryView(libraryManager: libraryManager, navigationPath: $libraryNavigationPath)
-                .tabItem {
-                    Label("Library", systemImage: "books.vertical.fill")
-                }
-                .tag(1)
+            NavigationStack(path: $libraryNavigationPath) {
+                LibraryView(libraryManager: libraryManager, navigationPath: $libraryNavigationPath)
+            }
+            .tabItem {
+                Label("Library", systemImage: "books.vertical.fill")
+            }
+            .tag(1)
             
             NavigationStack {
                 SettingsView()
@@ -72,6 +82,13 @@ struct ContentView: View {
         }
         .onChange(of: selectedTab) { newValue in
             updateTabBarAppearance(for: newValue)
+            print("ContentView onChange(selectedTab): \(newValue) homePathCount=\(homeNavigationPath.count) libraryPathCount=\(libraryNavigationPath.count)")
+        }
+        .onChange(of: homeNavigationPath) { newValue in
+            print("ContentView onChange(homeNavigationPath): count=\(newValue.count)")
+        }
+        .onChange(of: libraryNavigationPath) { newValue in
+            print("ContentView onChange(libraryNavigationPath): count=\(newValue.count)")
         }
     }
 }

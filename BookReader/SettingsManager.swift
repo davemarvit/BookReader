@@ -67,7 +67,7 @@ class SettingsManager: ObservableObject {
     @AppStorage("googleAPIKey") var googleAPIKey: String = ""
     @AppStorage("selectedVoiceID") var selectedVoiceID: String = "en-US-Journey-D" // Default Google Voice
     @AppStorage("selectedAppleVoiceID") var selectedAppleVoiceID: String = "" // Default System Voice (empty = default)
-    @AppStorage("preferredEngine") var preferredEngine: String = "google" // google, apple
+    @AppStorage("preferredEngine") var preferredEngine: String = "apple" // apple, google
     @AppStorage("librarySortOption") var librarySortOption: String = "recent" // recent, title, author
     
     // Reader Appearance
@@ -89,5 +89,19 @@ class SettingsManager: ObservableObject {
     
     var currentTheme: ReaderTheme {
         return ReaderTheme(rawValue: readerTheme) ?? .system
+    }
+    
+    // MARK: - Playback Controller Helpers
+    
+    var preferredVoiceMode: VoiceMode {
+        return preferredEngine == "google" ? .premium : .standard
+    }
+    
+    var currentPremiumVoiceID: String {
+        return selectedVoiceID
+    }
+    
+    var currentStandardVoiceID: String {
+        return selectedAppleVoiceID.isEmpty ? "apple-default" : selectedAppleVoiceID
     }
 }

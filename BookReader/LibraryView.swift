@@ -57,118 +57,119 @@ struct LibraryView: View {
     }
     
     var body: some View {
-        NavigationStack(path: $navigationPath) {
-            List {
-                if AppConfig.shared.isMonetizationBeta && !hasSeenLibraryWelcome {
-                    Section {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Welcome — Your library is ready")
-                                .font(.headline)
-                                .foregroundColor(.primary)
-                            Text("Tap any book to start listening, or tap + to add your own books.")
-                                .font(.subheadline)
-                                .foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 8)
+        List {
+            if AppConfig.shared.isMonetizationBeta && !hasSeenLibraryWelcome {
+                Section {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Welcome — Your library is ready")
+                            .font(.headline)
+                            .foregroundColor(.primary)
+                        Text("Tap any book to start listening, or tap + to add your own books.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                     }
-                }
-                
-                ForEach(sortedBooks) { book in
-                    BookRow(
-                        book: book,
-                        libraryManager: libraryManager,
-                        progress: getProgress(for: book),
-                        onTapMain: {
-                            hideWelcomeHint()
-                            openBook(book)
-                        },
-                        onTapProgress: {
-                            hideWelcomeHint()
-                            openMetadata(book)
-                        }
-                    )
-                }
-                .onDelete { indexSet in
-                    // Resolve the UUID immediately
-                    if let first = indexSet.first {
-                        bookToDelete = sortedBooks[first].id
-                        showingDeleteConfirmation = true
-                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 8)
                 }
             }
-            .simultaneousGesture(DragGesture().onChanged { value in
-                if abs(value.translation.height) > 10 {
-                    hideWelcomeHint()
-                }
-            })
-            .navigationTitle("My Library")
-            .searchable(text: $searchText, prompt: "Search title, author, or tags")
-            .confirmationDialog("Delete Book?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
-                Button("Delete", role: .destructive) {
-                    if let id = bookToDelete {
-                        libraryManager.deleteBook(id: id)
-                    }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This will permanently remove the book and your reading progress from this device.")
-            }
-            .navigationDestination(for: NavigationDestination.self) { destination in
-                    if case let .reader(doc, book) = destination {
-                        ReaderView(
-                            document: doc,
-                            bookID: book.id,
-                            libraryManager: libraryManager,
-                            onClose: {
-                                navigationPath = []
-                            },
-                            onOpenLibrary: {
-                                navigationPath = []
-                            }
-                        )
-                    } else if case let .metadata(book) = destination {
-                        MetadataView(libraryManager: libraryManager, book: book)
-                    }
-                }
             
-            // Hidden navigation link mechanism REMOVED in favor of shared path
-            
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    HStack(spacing: 16) {
-                        Menu {
-                            Picker("Sort By", selection: $settings.librarySortOption) {
-                                Text("Most Recent").tag("recent")
-                                Text("Title").tag("title")
-                                Text("Author").tag("author")
-                                Text("Most Read").tag("most_read")
-                                Text("Least Read").tag("least_read")
-                            }
-                        } label: {
-                            Image(systemName: "arrow.up.arrow.down")
+            ForEach(sortedBooks) { book in
+                BookRow(
+                    book: book,
+                    libraryManager: libraryManager,
+                    progress: getProgress(for: book),
+                    onTapMain: {
+                        print("LibraryView onTapMain: \(book.title) id=\(book.id)")
+                        hideWelcomeHint()
+                        openBook(book)
+                    },
+                    onTapProgress: {
+                        print("LibraryView onTapProgress: \(book.title) id=\(book.id)")
+                        hideWelcomeHint()
+                        openMetadata(book)
+                    }
+                )
+            }
+            .onDelete { indexSet in
+                // Resolve the UUID immediately
+                if let first = indexSet.first {
+                    bookToDelete = sortedBooks[first].id
+                    showingDeleteConfirmation = true
+                }
+            }
+        }
+        .simultaneousGesture(DragGesture().onChanged { value in
+            if abs(value.translation.height) > 10 {
+                hideWelcomeHint()
+            }
+        })
+        .navigationTitle("My Library")
+        .searchable(text: $searchText, prompt: "Search title, author, or tags")
+        .confirmationDialog("Delete Book?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let id = bookToDelete {
+                    libraryManager.deleteBook(id: id)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently remove the book and your reading progress from this device.")
+        }
+        // Hidden navigation link mechanism REMOVED in favor of shared path
+        
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                HStack(spacing: 16) {
+                    Menu {
+                        Picker("Sort By", selection: $settings.librarySortOption) {
+                            Text("Most Recent").tag("recent")
+                            Text("Title").tag("title")
+                            Text("Author").tag("author")
+                            Text("Most Read").tag("most_read")
+                            Text("Least Read").tag("least_read")
                         }
-                        
-                        Button(action: { 
-                            isImporterPresented = true
-                            hideWelcomeHint()
-                        }) {
-                            Image(systemName: "plus")
-                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
+                    
+                    Button(action: { 
+                        isImporterPresented = true
+                        hideWelcomeHint()
+                    }) {
+                        Image(systemName: "plus")
                     }
                 }
             }
-            .fileImporter(
-                isPresented: $isImporterPresented,
-                allowedContentTypes: [UTType.pdf, UTType.plainText, UTType.epub, UTType(filenameExtension: "epub")!],
-                allowsMultipleSelection: true
-            ) { result in
-                handleImport(result: result)
+        }
+        .fileImporter(
+            isPresented: $isImporterPresented,
+            allowedContentTypes: [UTType.pdf, UTType.plainText, UTType.epub, UTType(filenameExtension: "epub")!],
+            allowsMultipleSelection: true
+        ) { result in
+            handleImport(result: result)
+        }
+        .navigationDestination(for: NavigationDestination.self) { destination in
+            let _ = print("LibraryView navigationDestination resolver fired")
+            if case let .reader(doc, book) = destination {
+                ReaderView(
+                    document: doc,
+                    bookID: book.id,
+                    libraryManager: libraryManager,
+                    onClose: {
+                        self.navigationPath.removeAll()
+                    },
+                    onOpenLibrary: {
+                        self.navigationPath.removeAll()
+                    }
+                )
+            } else if case let .metadata(book) = destination {
+                let _ = print("LibraryView navigationDestination resolver: handling .metadata")
+                MetadataView(libraryManager: libraryManager, book: book)
             }
-            .onAppear {
-                if AppConfig.shared.isMonetizationBeta && !hasSeenLibraryWelcome {
-                    // State automatically handles welcome banner
-                }
+        }
+        .onAppear {
+            if AppConfig.shared.isMonetizationBeta && !hasSeenLibraryWelcome {
+                // State automatically handles welcome banner
             }
         }
     }
@@ -180,15 +181,23 @@ struct LibraryView: View {
     }
     
     func openMetadata(_ book: BookMetadata) {
+        print("LibraryView openMetadata: entering for \(book.title)")
+        print("LibraryView navigationPath.count before append: \(navigationPath.count)")
         self.navigationPath.append(.metadata(book))
+        print("LibraryView navigationPath.count after append: \(navigationPath.count)")
     }
     
     func openBook(_ book: BookMetadata) {
+        print("LibraryView openBook: entering for \(book.title)")
         let url = libraryManager.getBookURL(for: book)
         // Ensure we load asynchronously if needed, but for now simple checks
         if let doc = DocumentParser.parse(url: url) {
-            // Append to shared path -> Triggers HomeView's navigationDestination
+            print("LibraryView openBook: DocumentParser.parse succeeded")
+            print("LibraryView navigationPath.count before append: \(navigationPath.count)")
             self.navigationPath.append(.reader(doc, book))
+            print("LibraryView navigationPath.count after append: \(navigationPath.count)")
+        } else {
+            print("LibraryView openBook: DocumentParser.parse failed")
         }
     }
     
