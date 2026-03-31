@@ -295,17 +295,15 @@ struct ReaderView: View {
 
                     if audioController.voiceModeController.activeMode == .premium && settings.hasValidGoogleKey {
                         Button("Switch to Standard") {
-                            audioController.errorMessage = nil
                             settings.preferredEngine = "apple"
-                            audioController.voiceModeController.requestModeSwitch(.standard, isPlaying: audioController.isPlaying)
+                            audioController.handleManualVoiceSwitch(to: .standard)
                             showingVoiceModeSheet = false
                         }
                         .buttonStyle(.bordered)
                     } else if settings.hasValidGoogleKey {
                         Button("Switch to Premium") {
-                            audioController.errorMessage = nil
                             settings.preferredEngine = "google"
-                            audioController.voiceModeController.requestModeSwitch(.premium, isPlaying: audioController.isPlaying)
+                            audioController.handleManualVoiceSwitch(to: .premium)
                             showingVoiceModeSheet = false
                         }
                         .buttonStyle(.borderedProminent)
@@ -326,7 +324,7 @@ struct ReaderView: View {
     } // End Body
     
     var voiceModeLabel: String {
-        let isPremiumMode = audioController.voiceModeController.activeMode == .premium
+        let isPremiumMode = audioController.resolvedPlaybackMode == .premium
         let hasKey = settings.hasValidGoogleKey
         let isUnavailable = audioController.voiceModeController.isPremiumTemporarilyUnavailable
         

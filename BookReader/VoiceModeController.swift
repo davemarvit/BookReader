@@ -18,19 +18,45 @@ final class VoiceModeController: ObservableObject {
         requestedMode = SettingsManager.shared.preferredVoiceMode
     }
 
-    /// Queues a mode change. Applies instantly if paused, or delays until boundary if playing.
-    func requestModeSwitch(_ mode: VoiceMode, isPlaying: Bool) {
+    /// Queues or instantly applies a mode change depending on intent and playback state.
+    func requestModeSwitch(_ mode: VoiceMode, intent: VoiceSwitchIntent, isPlaying: Bool) {
         requestedMode = mode
         
-        if isPlaying {
-            if mode != activeMode {
-                pendingMode = mode
-            } else {
-                pendingMode = nil
-            }
-        } else {
+        switch intent {
+        case .userInitiated:
+            // Manual switches happen immediately; they do not wait for boundaries
             activeMode = mode
             pendingMode = nil
+            if mode == .premium {
+                isPremiumTemporarilyUnavailable = false // Clear blocks upon manual re-engagement
+            }
+            
+        case .systemForcedFallback:
+            // System switches wait for paragraph boundaries to prevent jarring audio tearing
+            if isPlaying {
+                if mode != activeMode {
+                    pendingMode = mode
+                } else {
+                    pendingMode = nil
+                }
+            } else {
+                activeMode = mode
+                pendingMode = nil
+            }
+            
+        case .systemRecovery:
+            // Recovery must force a boundary handoff even if activeMode logically remained .premium
+            let bPending = pendingMode
+            let bActive = activeMode
+            let bReq = requestedMode
+            
+            if isPlaying {
+                pendingMode = mode
+            } else {
+                activeMode = mode
+                pendingMode = nil
+            }
+            print("[RECOVERY_TRACE] VMC systemRecovery: mode=\(mode) isPlaying=\(isPlaying) | Before: a=\(bActive) r=\(bReq) p=\(String(describing: bPending)) | After: a=\(activeMode) r=\(requestedMode) p=\(String(describing: pendingMode))")
         }
     }
 

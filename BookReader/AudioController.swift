@@ -38,13 +38,23 @@ class AudioController: NSObject, ObservableObject {
     @Published var diagnosticDetails: String = "Diagnostics: Initializing..."
     private var playbackGeneration = UUID()
 
+    private var isTransitioningPlayback = false
+
     private let settings = SettingsManager.shared
     let entitlementManager = EntitlementManager()
     let gateController = PlaybackGateController()
     let voiceModeController = VoiceModeController()
 
     private var premiumCapabilityAvailable: Bool { settings.hasValidGoogleKey }
-    private var isPremiumActiveMode: Bool { voiceModeController.activeMode == .premium && premiumCapabilityAvailable && !voiceModeController.isPremiumTemporarilyUnavailable }
+    
+    /// The single source of truth evaluating intended routing for startups and banners
+    var resolvedPlaybackMode: VoiceMode {
+        let isReady = premiumCapabilityAvailable && !voiceModeController.isPremiumTemporarilyUnavailable
+        let targetMode = isSessionActive ? voiceModeController.activeMode : settings.preferredVoiceMode
+        return (targetMode == .premium && isReady) ? .premium : .standard
+    }
+    
+    private var isPremiumActiveMode: Bool { resolvedPlaybackMode == .premium }
 
     private var activeTask: Task<Void, Never>?
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
@@ -103,6 +113,7 @@ class AudioController: NSObject, ObservableObject {
         timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                guard !self.isTransitioningPlayback else { return }
                 if self.isPremiumActiveMode {
                     self.isPlaying = (player.timeControlStatus == .playing || player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
                 }
@@ -112,6 +123,7 @@ class AudioController: NSObject, ObservableObject {
         playerItemObservation = player.observe(\.currentItem, options: [.new, .old]) { [weak self] player, change in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                guard !self.isTransitioningPlayback else { return }
 
                 if let newItem = change.newValue as? AVPlayerItem {
                     if let oldItem = change.oldValue as? AVPlayerItem, let oldIndex = self.itemIndexMap[oldItem] {
@@ -121,18 +133,25 @@ class AudioController: NSObject, ObservableObject {
                         }
                     }
                     self.handleCurrentItemChange(to: newItem)
-                } else if change.newValue == nil && self.isPremiumActiveMode {
+                } else if player.currentItem == nil && self.voiceModeController.requestedMode == .premium {
                     guard self.highestEnqueuedIndex != -1 else { return }
 
-                    AppLogger.logEvent("QUEUE_EMPTY")
-                    if let oldItem = change.oldValue as? AVPlayerItem, let oldIndex = self.itemIndexMap[oldItem] {
-                        AppLogger.logEvent("PLAYBACK_FINISH", metadata: ["index": oldIndex])
+                    logControlState(event: "queue_empty", reason: "starvation")
+                    
+                    let completedIndex = self.currentParagraphIndex
+                    AppLogger.logEvent("PLAYBACK_FINISH", metadata: ["index": completedIndex])
 
-                        if self.isPlaying && oldIndex < self.paragraphs.count - 1 {
-                            let nextReq = oldIndex + 1
-                            AppLogger.logEvent("QUEUE_STARVATION_START", metadata: ["nextRequiredIndex": nextReq, "queueCount": 0])
-                            self.starvationStartTime = Date()
-                        }
+                    if self.isSessionActive && completedIndex < self.paragraphs.count - 1 {
+                        let nextReq = completedIndex + 1
+                        AppLogger.logEvent("QUEUE_STARVATION_START", metadata: ["nextRequiredIndex": nextReq, "queueCount": 0])
+                        self.starvationStartTime = Date()
+                        
+                        // If the physical AVPlayer queue runs completely dry mid-book, the network failed 
+                        // real-time requirements. Atomically commit paragraph completion and fallback.
+                        self.voiceModeController.markPremiumTemporarilyUnavailable(true)
+                        AppLogger.logEvent("FALLBACK_TRIGGERED_ON_STARVATION", metadata: ["index": nextReq])
+                        self.logControlState(event: "fallback_committed", reason: "queue_empty", extra: ["nextReq": nextReq])
+                        self.transitionAndContinuePlayback(to: nextReq, shouldPlay: true, markTemporarilyUnavailable: true)
                     }
 
                     if self.currentParagraphIndex >= self.paragraphs.count - 1 {
@@ -269,6 +288,14 @@ class AudioController: NSObject, ObservableObject {
         
         errorMessage = nil // clear error when user attempts to play
         
+        // Ensure playback engine synchronizes to the single-source-of-truth resolved mode on cold start.
+        // Solves the issue where VoiceModeController's object init blindly captures @AppStorage defaults too early.
+        if !isPlaying {
+            let targetMode = resolvedPlaybackMode
+            if voiceModeController.activeMode != targetMode {
+                voiceModeController.requestModeSwitch(targetMode, intent: .userInitiated, isPlaying: false)
+            }
+        }
         
         // Evaluate Smart Rewind
         if let pauseTime = lastPauseTime {
@@ -418,6 +445,107 @@ class AudioController: NSObject, ObservableObject {
         }
     }
 
+    // MARK: - Voice Mode Switching
+
+    func handleManualVoiceSwitch(to mode: VoiceMode) {
+        let isCurrentlyPlaying = self.isPlaying
+        self.errorMessage = nil
+
+        voiceModeController.requestModeSwitch(mode, intent: .userInitiated, isPlaying: isCurrentlyPlaying)
+
+        if isCurrentlyPlaying {
+            restartCurrentParagraphForEngineSwitch()
+        } else {
+            // Paused: Just clear out stale caches so the new engine initializes freshly next play
+            downloadTasks.values.forEach { $0.cancel() }
+            downloadTasks.removeAll()
+            player.removeAllItems()
+            itemIndexMap.removeAll()
+            appleTTSDebounceTimer?.invalidate()
+            currentAppleUtterance = nil
+            localSynthesizer.stopSpeaking(at: .immediate)
+        }
+    }
+
+    private func restartCurrentParagraphForEngineSwitch() {
+        transitionAndContinuePlayback(to: currentParagraphIndex, shouldPlay: true, markTemporarilyUnavailable: nil)
+    }
+
+    private func transitionAndContinuePlayback(to activeIndex: Int, shouldPlay: Bool, markTemporarilyUnavailable: Bool?) {
+        print("[TRANSITION_TRACE] Helper start: to=\(activeIndex), choosePremium=\(isPremiumActiveMode), play=\(shouldPlay), unavail=\(String(describing: markTemporarilyUnavailable))")
+        isTransitioningPlayback = true
+        
+        // 1. Clear old engine state
+        // PRESERVE pre-fetched tasks exclusively during automated premium recovery
+        let isRecoveringPremium = isPremiumActiveMode && (markTemporarilyUnavailable == false)
+        if !isRecoveringPremium {
+            downloadTasks.values.forEach { $0.cancel() }
+            downloadTasks.removeAll()
+        }
+        playbackGeneration = UUID()
+        highestEnqueuedIndex = -1
+        queueMaintenanceTask?.cancel()
+        watchdogTask?.cancel()
+        player.pause()
+        player.removeAllItems()
+        itemIndexMap.removeAll()
+        appleTTSDebounceTimer?.invalidate()
+        currentAppleUtterance = nil
+        localSynthesizer.stopSpeaking(at: .immediate)
+        isLoading = false
+        activeTask?.cancel()
+        errorMessage = nil
+        
+        // 2. Set current index correctly
+        currentParagraphIndex = activeIndex
+        
+        // 3. Apply transition state (availability / mode)
+        if let unavailable = markTemporarilyUnavailable {
+            voiceModeController.markPremiumTemporarilyUnavailable(unavailable)
+            if unavailable {
+                startPremiumRecoveryProbe()
+            } else {
+                premiumRecoveryTimer?.invalidate()
+                premiumRecoveryTimer = nil
+            }
+        }
+        
+        // 4. If playback should continue: explicitly call correct engine start logic
+        if shouldPlay {
+            isSessionActive = true
+            if isPremiumActiveMode {
+                playGoogle()
+            } else {
+                playLocal()
+            }
+        } else {
+            // 5. If playback should NOT continue: remain paused
+            isSessionActive = false
+            isPlaying = false
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self else { return }
+            print("[TRANSITION_TRACE] +0.1s: isPlay=\(self.isPlaying), item=\(self.player.currentItem != nil), spk=\(self.localSynthesizer.isSpeaking)")
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self else { return }
+            print("[TRANSITION_TRACE] +0.5s: isPlay=\(self.isPlaying), item=\(self.player.currentItem != nil), spk=\(self.localSynthesizer.isSpeaking)")
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            self?.isTransitioningPlayback = false
+        }
+        
+        if isRecoveringPremium {
+            logControlState(event: "recovery_steady_state", reason: "0s")
+            traceSteadyState(after: 1.0, phase: "1s")
+            traceSteadyState(after: 3.0, phase: "3s")
+            traceSteadyState(after: 5.0, phase: "5s")
+            traceSteadyState(after: 10.0, phase: "10s")
+        }
+    }
+
     // MARK: - Apple TTS Implementation
 
     private func playLocal() {
@@ -472,7 +600,9 @@ class AudioController: NSObject, ObservableObject {
     // MARK: - Google TTS Implementation
 
     private func playGoogle() {
+        print("[RECOVERY_TRACE] entered playGoogle: idx=\(currentParagraphIndex) item=\(player.currentItem != nil) count=\(player.items().count)")
         if player.currentItem != nil {
+            print("[RECOVERY_TRACE] playGoogle branch: resume existing item")
             player.defaultRate = playbackRate
             player.play()
             player.rate = playbackRate
@@ -481,6 +611,7 @@ class AudioController: NSObject, ObservableObject {
             return
         }
 
+        print("[RECOVERY_TRACE] playGoogle branch: enqueue-and-play")
         activeTask?.cancel()
         activeTask = Task { @MainActor in
             await EnqueueAndPlay(from: currentParagraphIndex)
@@ -517,6 +648,13 @@ class AudioController: NSObject, ObservableObject {
                 AppLogger.logEvent("AUDIO_ENQUEUED", metadata: ["index": index, "reason": "root_insertion"])
                 AppLogger.logEvent("QUEUE_COUNT", metadata: ["count": 1])
                 player.insert(item, after: nil)
+                
+                // Explicitly boot the prepipeline since dynamic engine transitions suppress the native KVO hook
+                queueMaintenanceTask?.cancel()
+                queueMaintenanceTask = Task { @MainActor [weak self] in
+                    guard let self = self, self.playbackGeneration == expectedGen else { return }
+                    await self.maintainQueue(currentIndex: index)
+                }
             }
 
             loadingTask.cancel()
@@ -547,13 +685,12 @@ class AudioController: NSObject, ObservableObject {
             }
 
             if isTransient {
-                voiceModeController.markPremiumTemporarilyUnavailable(true)
-                startPremiumRecoveryProbe()
-                playLocal()
+                transitionAndContinuePlayback(to: currentParagraphIndex, shouldPlay: true, markTemporarilyUnavailable: true)
             } else {
                 isPlaying = false
                 errorMessage = caughtError.localizedDescription
             }
+            print("[RECOVERY_TRACE] EnqueueAndPlay catch: idx=\(currentParagraphIndex) err=\(caughtError.localizedDescription) trans=\(isTransient) activeMode=\(voiceModeController.activeMode)")
         }
     }
 
@@ -570,7 +707,8 @@ class AudioController: NSObject, ObservableObject {
 
         let expectedGen = playbackGeneration
         for (nextIndex, task) in tasks {
-            if let url = try? await task.value {
+            do {
+                let url = try await task.value
                 if Task.isCancelled || playbackGeneration != expectedGen {
                     AppLogger.logEvent("MAINTAIN_QUEUE_CANCELLED", metadata: ["index": nextIndex])
                     return
@@ -579,7 +717,7 @@ class AudioController: NSObject, ObservableObject {
                 let items = player.items()
                 let alreadyQueued = items.contains { itemIndexMap[$0] == nextIndex }
                 let isMonotonicallyValid = nextIndex > highestEnqueuedIndex
-
+                
                 if !alreadyQueued && isMonotonicallyValid {
                     let newItem = AVPlayerItem(url: url)
                     itemIndexMap[newItem] = nextIndex
@@ -595,6 +733,12 @@ class AudioController: NSObject, ObservableObject {
                 } else if !alreadyQueued && !isMonotonicallyValid {
                     AppLogger.logEvent("ENQUEUE_REJECTED", metadata: ["index": nextIndex, "highestEnqueuedIndex": highestEnqueuedIndex, "reason": "stale_index_chronology"])
                 }
+            } catch {
+                if Task.isCancelled || playbackGeneration != expectedGen { return }
+                // Do not trigger aggressive fallback on single fetch failure or minor network jitter.
+                // Allow the player to seamlessly consume remaining buffered premium chunks.
+                // True exhaustion fallback is cleanly handled by the playerItemObservation QUEUE_EMPTY boundary.
+                return // Stop attempting to fill the queue
             }
         }
     }
@@ -605,36 +749,10 @@ class AudioController: NSObject, ObservableObject {
         // Mode switch boundary evaluation
         if voiceModeController.hasPendingSwitch {
             let resolvedMode = voiceModeController.resolveModeForNextParagraph()
+            print("[TRANSITION_TRACE] AV boundary evaluate: idx=\(index) pending=true resolved=\(resolvedMode)")
             
-            AppLogger.logEvent("VOICE_MODE_SWITCH", metadata: ["newMode": resolvedMode == .premium ? "premium" : "standard", "boundaryIndex": index])
-            
-            let boundaryIndex = index
-            playbackGeneration = UUID()
-            
-            activeTask?.cancel()
-            appleTTSDebounceTimer?.invalidate()
-            currentAppleUtterance = nil
-            localSynthesizer.stopSpeaking(at: .immediate)
-            
-            queueMaintenanceTask?.cancel()
-            watchdogTask?.cancel()
-            downloadTasks.values.forEach { $0.cancel() }
-            downloadTasks.removeAll()
-            audioCache.removeAll()
-            player.pause()
-            player.removeAllItems()
-            itemIndexMap.removeAll()
-            highestEnqueuedIndex = -1
-            currentParagraphIndex = boundaryIndex
-            isLoading = false
-            errorMessage = nil
-            
-            if resolvedMode == .premium && premiumCapabilityAvailable && !voiceModeController.isPremiumTemporarilyUnavailable {
-                playGoogle()
-            } else {
-                playLocal()
-            }
-            
+            let clearFlag: Bool? = (resolvedMode == .premium) ? false : nil
+            transitionAndContinuePlayback(to: index, shouldPlay: isSessionActive, markTemporarilyUnavailable: clearFlag)
             return
         }
 
@@ -714,13 +832,45 @@ class AudioController: NSObject, ObservableObject {
         diagnosticDetails = "Engine: \(engine) | Slider: \(pRate) | True Rate: \(aRate) | Queue: \(cInt) | \(stat)"
     }
     
+    private func logControlState(event: String, reason: String? = nil, extra: [String: Any] = [:]) {
+        let ts = String(format: "%.3f", Date().timeIntervalSince1970)
+        let active = voiceModeController.activeMode == .premium ? "premium" : "standard"
+        let req = voiceModeController.requestedMode == .premium ? "premium" : "standard"
+        let unavail = voiceModeController.isPremiumTemporarilyUnavailable
+        let pend = voiceModeController.hasPendingSwitch
+        let qCount = player.items().count
+        let fbSec = starvationStartTime != nil ? String(format: "%.1f", abs(Date().timeIntervalSince(starvationStartTime!))) : "nil"
+
+        var msg = "[CONTROL] ts=\(ts) event=\(event)"
+        if let r = reason { msg += " reason=\(r)" }
+        msg += " idx=\(currentParagraphIndex) req=\(req) act=\(active) unavail=\(unavail) pend=\(pend) play=\(isPlaying) sess=\(isSessionActive) rate=\(playbackRate) qCount=\(qCount) probeCount=\(consecutiveSuccessfulProbes) fbSec=\(fbSec)"
+        for (k, v) in extra { msg += " \(k)=\(v)" }
+        print(msg)
+    }
+
+    private func traceSteadyState(after delay: TimeInterval, phase: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            let hasQTask = self.queueMaintenanceTask != nil && !self.queueMaintenanceTask!.isCancelled
+            self.logControlState(event: "steady_state_trace", reason: phase, extra: [
+                "delay": delay,
+                "hiIdx": self.highestEnqueuedIndex,
+                "hasQTask": hasQTask,
+                "dlCount": self.downloadTasks.count,
+                "gen": self.playbackGeneration.uuidString.prefix(4)
+            ])
+        }
+    }
+
     // MARK: - Premium Recovery
 
     private var premiumRecoveryTimer: Timer?
+    private var consecutiveSuccessfulProbes = 0
     
     private func startPremiumRecoveryProbe() {
         guard premiumRecoveryTimer == nil else { return }
-        premiumRecoveryTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { [weak self] timer in
+        consecutiveSuccessfulProbes = 0
+        premiumRecoveryTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] timer in
             guard let self = self else {
                 timer.invalidate()
                 return
@@ -740,19 +890,76 @@ class AudioController: NSObject, ObservableObject {
             return
         }
         
+        logControlState(event: "recovery_probe_runs")
+        // Secondary Gate: Cooldown
+        if let starvationTime = starvationStartTime, abs(Date().timeIntervalSince(starvationTime)) < 10.0 {
+            logControlState(event: "recovery_gate_rejected", reason: "cooldown_active")
+            return
+        }
+        
         // Find next appropriate index to prefetch and probe
-        let probeIndex = min(currentParagraphIndex + 1, paragraphs.count > 0 ? paragraphs.count - 1 : 0)
+        // We advance the lookahead probe index based on consecutive successes to build up the buffer
+        let probeOffset = consecutiveSuccessfulProbes + 1
+        let probeIndex = min(currentParagraphIndex + probeOffset, paragraphs.count > 0 ? paragraphs.count - 1 : 0)
+        
         do {
             let task = ensureAudioTask(for: probeIndex)
             _ = try await task.value
             
-            print("Premium capability recovered via probe.")
-            voiceModeController.markPremiumTemporarilyUnavailable(false)
+            consecutiveSuccessfulProbes += 1
+            
+            // Primary Gate: Buffered Playback Readiness
+            let rate = Double(playbackRate > 0 ? playbackRate : 1.0)
+            var totalDuration = 0.0
+
+            let bookIDString = currentBookID?.uuidString ?? "temp"
+            let voiceID = SettingsManager.shared.selectedVoiceID
+            let tempDir = FileManager.default.temporaryDirectory
+
+            let startIndex = currentParagraphIndex + 1
+            if startIndex < paragraphs.count {
+                for index in startIndex..<paragraphs.count {
+                    let expectedFileURL = tempDir.appendingPathComponent("para_\(bookIDString)_\(index)_\(voiceID).mp3")
+                    
+                    if FileManager.default.fileExists(atPath: expectedFileURL.path) {
+                        let asset = AVURLAsset(url: expectedFileURL)
+                        let durationSeconds = asset.duration.seconds
+                        if !durationSeconds.isNaN && durationSeconds > 0 {
+                            totalDuration += durationSeconds
+                        }
+                    } else {
+                        break // stop at first gap — only contiguous buffer counts
+                    }
+                }
+            }
+
+            let bufferedSeconds = totalDuration / rate
+            let isAtEnd = probeIndex == (paragraphs.count > 0 ? paragraphs.count - 1 : 0)
+
+            guard consecutiveSuccessfulProbes >= 2 && (bufferedSeconds >= 10.0 || isAtEnd) else {
+                logControlState(event: "recovery_gate_rejected", reason: "buffer_below_threshold", extra: ["bufferedSec": String(format: "%.1f", bufferedSeconds)])
+                return // Wait for stability and sufficient buffer before switching
+            }
+            
+            logControlState(event: "recovery_gate_accepted", reason: "recovery_ready")
+            
+            let wasPlayingFallback = self.isPlaying && !self.isPremiumActiveMode
+            logControlState(event: "recovery_committed", reason: "switch_request", extra: ["wasFallback": wasPlayingFallback])
+            
+            if wasPlayingFallback {
+                // Defer clearing flag until the Apple boundary actually executes the pending switch
+                voiceModeController.requestModeSwitch(.premium, intent: .systemRecovery, isPlaying: true)
+            } else {
+                voiceModeController.markPremiumTemporarilyUnavailable(false)
+            }
+            print("[RECOVERY_TRACE] After switch req: a=\(voiceModeController.activeMode) r=\(voiceModeController.requestedMode) unavail=\(voiceModeController.isPremiumTemporarilyUnavailable) pend=\(voiceModeController.hasPendingSwitch)")
+            
             premiumRecoveryTimer?.invalidate()
             premiumRecoveryTimer = nil
             errorMessage = nil // clean stale fallback errors
         } catch {
-            print("Premium probe failed, still unavailable.")
+            consecutiveSuccessfulProbes = 0 // Reset on failure to enforce contiguous stability
+            // Suppress repetitive probe failure noise
         }
     }
 
@@ -845,6 +1052,9 @@ class AudioController: NSObject, ObservableObject {
                     "audioSize": data.count
                 ])
 
+                Task { @MainActor in
+                    self.logControlState(event: "fetch_success", extra: ["durMs": durationMs, "bytes": data.count])
+                }
                 print("[BookReader][TTS_METRIC] index=\(index) chars=\(chars) words=\(words) sentences=\(sentences) speed=\(currentSpeed) durationMs=\(durationMs) audioBytes=\(data.count) success=true isNextRequired=\(isNextReq) queueCount=\(qCount) nextRequiredIndex=\(nextReq) bufferedAheadCount=\(bufferedAhead)")
 
                 return fileURL
@@ -861,6 +1071,9 @@ class AudioController: NSObject, ObservableObject {
                     "durationMs": durationMs
                 ])
 
+                Task { @MainActor in
+                    self.logControlState(event: "fetch_failure", reason: "network_error", extra: ["domain": nsError.domain, "code": nsError.code])
+                }
                 print("[BookReader][TTS_METRIC] index=\(index) chars=\(chars) words=\(words) sentences=\(sentences) speed=\(currentSpeed) durationMs=\(durationMs) success=false errorDomain=\(nsError.domain) errorCode=\(nsError.code) isNextRequired=\(isNextReq) queueCount=\(qCount) nextRequiredIndex=\(nextReq) bufferedAheadCount=\(bufferedAhead)")
 
                 throw error
@@ -1001,6 +1214,7 @@ class AudioController: NSObject, ObservableObject {
 // MARK: - Apple TTS Delegate
 extension AudioController: @preconcurrency AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        if isTransitioningPlayback { return }
         guard !isPremiumActiveMode else { return }
 
         guard utterance == currentAppleUtterance else { return }
@@ -1008,22 +1222,16 @@ extension AudioController: @preconcurrency AVSpeechSynthesizerDelegate {
         if isSessionActive {
             let next = currentParagraphIndex + 1
             if next < paragraphs.count {
+                print("[RECOVERY_TRACE] Apple boundary evaluate: currIdx=\(currentParagraphIndex) next=\(next) pend=\(voiceModeController.hasPendingSwitch) a=\(voiceModeController.activeMode) r=\(voiceModeController.requestedMode) unavail=\(voiceModeController.isPremiumTemporarilyUnavailable) isPremAct=\(isPremiumActiveMode)")
                 if voiceModeController.hasPendingSwitch {
-                    currentAppleUtterance = nil
-                    
                     let resolvedMode = voiceModeController.resolveModeForNextParagraph()
-                    currentParagraphIndex = next
+                    print("[RECOVERY_TRACE] Apple boundary HAS PENDING: resolved=\(resolvedMode) -> calling transitionAndContinuePlayback")
                     
-                    if resolvedMode == .premium && premiumCapabilityAvailable && !voiceModeController.isPremiumTemporarilyUnavailable {
-                        playGoogle()
-                    } else {
-                        speakLocalParagraph(index: next)
-                    }
+                    let clearFlag: Bool? = (resolvedMode == .premium) ? false : nil
+                    transitionAndContinuePlayback(to: next, shouldPlay: true, markTemporarilyUnavailable: clearFlag)
                 } else if voiceModeController.activeMode == .premium && premiumCapabilityAvailable && !voiceModeController.isPremiumTemporarilyUnavailable {
                     // Restores premium natively if it was temporarily disabled due to failure and just recovered
-                    currentAppleUtterance = nil
-                    currentParagraphIndex = next
-                    playGoogle()
+                    transitionAndContinuePlayback(to: next, shouldPlay: true, markTemporarilyUnavailable: false)
                 } else {
                     currentParagraphIndex = next
                     speakLocalParagraph(index: next)
@@ -1038,9 +1246,12 @@ extension AudioController: @preconcurrency AVSpeechSynthesizerDelegate {
         }
     }
 
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didPause utterance: AVSpeechUtterance) { isPlaying = false }
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didContinue utterance: AVSpeechUtterance) { isPlaying = true }
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) { isPlaying = true }
-    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) { isPlaying = false }
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didPause utterance: AVSpeechUtterance) { if !isTransitioningPlayback { isPlaying = false } }
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didContinue utterance: AVSpeechUtterance) { if !isTransitioningPlayback { isPlaying = true } }
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didStart utterance: AVSpeechUtterance) {
+        print("[TRANSITION_TRACE] Apple didStart: index=\(currentParagraphIndex) transitioning=\(isTransitioningPlayback)")
+        if !isTransitioningPlayback { isPlaying = true }
+    }
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) { if !isTransitioningPlayback { isPlaying = false } }
 }
 

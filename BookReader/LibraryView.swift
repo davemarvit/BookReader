@@ -149,7 +149,6 @@ struct LibraryView: View {
             handleImport(result: result)
         }
         .navigationDestination(for: NavigationDestination.self) { destination in
-            let _ = print("LibraryView navigationDestination resolver fired")
             if case let .reader(doc, book) = destination {
                 ReaderView(
                     document: doc,
@@ -163,7 +162,6 @@ struct LibraryView: View {
                     }
                 )
             } else if case let .metadata(book) = destination {
-                let _ = print("LibraryView navigationDestination resolver: handling .metadata")
                 MetadataView(libraryManager: libraryManager, book: book)
             }
         }
