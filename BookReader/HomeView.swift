@@ -3,8 +3,10 @@ import SwiftUI
 struct HomeView: View {
     @ObservedObject var libraryManager: LibraryManager
     @EnvironmentObject var audioController: AudioController
+    @ObservedObject var settings = SettingsManager.shared
     @Binding var selectedTab: Int
     @Binding var navigationPath: [NavigationDestination]
+    @Binding var libraryPath: [NavigationDestination]
     
     var activeBook: BookMetadata? {
         if AppConfig.shared.isMonetizationBeta {
@@ -60,11 +62,6 @@ struct HomeView: View {
                         emptyStateContent
                     }
                 }
-                .navigationDestination(for: NavigationDestination.self) { destination in
-                     if case let .reader(doc, book) = destination {
-                         ReaderView(document: doc, bookID: book.id, libraryManager: libraryManager, onClose: { navigationPath = [] }, onOpenLibrary: { selectedTab = 1; navigationPath = [] })
-                     }
-                }
             } else {
                 // Legacy Target View
                 VStack {
@@ -83,14 +80,16 @@ struct HomeView: View {
                                     .fontWeight(.bold)
                                     .foregroundColor(.white)
                                     .multilineTextAlignment(.center)
-                                    .lineLimit(4)
+                                    .lineLimit(1)
                                     .minimumScaleFactor(0.8)
                                     .fixedSize(horizontal: false, vertical: true)
                                     .frame(maxWidth: .infinity)
                                     .padding()
                                     .background(Color.black.opacity(0.4))
                                     .cornerRadius(10)
+                                    .padding(.top, 0)
                                     .padding(.horizontal)
+                                    .padding(.bottom, 24)
                             }
                         }
                         .padding(.bottom, 40)
@@ -108,11 +107,6 @@ struct HomeView: View {
                             .foregroundColor(.white)
                     }
                     Spacer()
-                }
-                .navigationDestination(for: NavigationDestination.self) { destination in
-                     if case let .reader(doc, book) = destination {
-                         ReaderView(document: doc, bookID: book.id, libraryManager: libraryManager, onClose: { navigationPath = [] }, onOpenLibrary: { navigationPath = [] })
-                     }
                 }
                 .padding(.horizontal)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -133,6 +127,17 @@ struct HomeView: View {
                 )
             }
         }
+        .navigationDestination(for: NavigationDestination.self) { destination in
+            if case let .reader(doc, book) = destination {
+                ReaderView(
+                    document: doc,
+                    bookID: book.id,
+                    libraryManager: libraryManager,
+                    onClose: { navigationPath = [] },
+                    onOpenLibrary: { selectedTab = 1; navigationPath = [] }
+                )
+            }
+        }
     }
     
     @ViewBuilder
@@ -150,6 +155,14 @@ struct HomeView: View {
             
             VStack(spacing: 0) {
                 Spacer(minLength: 16)
+                
+                // 0. Persistent Status Line
+                if audioController.playbackState.availability == .temporarilyUnavailable {
+                    Text("Connection lost. Using Basic audio.")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.6))
+                        .padding(.bottom, 12)
+                }
                 
                 // 1. Cover
                 Button(action: { openReader(book) }) {
@@ -232,11 +245,18 @@ struct HomeView: View {
                 // 6 & 7. Play Control
                 Button(action: { togglePlayback(for: book) }) {
                     VStack(spacing: 12) {
-                        Image(systemName: playbackIconName(for: book))
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: isShort ? 65 : 80, height: isShort ? 65 : 80)
-                            .foregroundColor(.white)
+                        if audioController.isLoading && audioController.currentBookID == book.id {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(1.5)
+                                .frame(width: isShort ? 65 : 80, height: isShort ? 65 : 80)
+                        } else {
+                            Image(systemName: playbackIconName(for: book))
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: isShort ? 65 : 80, height: isShort ? 65 : 80)
+                                .foregroundColor(.white)
+                        }
                         
                         Text(buttonLabel(for: book, currentProgress: currentProgress))
                             .font(.subheadline)
@@ -244,6 +264,7 @@ struct HomeView: View {
                             .foregroundColor(.white)
                     }
                 }
+                .disabled(audioController.isLoading && audioController.currentBookID == book.id)
                 
                 Spacer(minLength: 16)
             }
@@ -291,17 +312,18 @@ struct HomeView: View {
                 endPoint: .bottom
             )
         )
-        .overlay(
-            VStack {
-                Spacer()
-                LinearGradient(
-                    gradient: Gradient(colors: [.clear, .black.opacity(0.3)]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 120)
-            }
-        )
+        .overlay(alignment: .bottom) {
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0.0),
+                    .init(color: .black.opacity(0.5), location: 0.6),
+                    .init(color: .black.opacity(0.85), location: 1.0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 220)
+        }
         .scaleEffect(1.15)
         .ignoresSafeArea(.all)
     }
@@ -354,7 +376,9 @@ struct HomeView: View {
     }
     
     func buttonLabel(for book: BookMetadata, currentProgress: Double) -> String {
-        if audioController.isPlaying && audioController.currentBookID == book.id {
+        if audioController.isLoading && audioController.currentBookID == book.id {
+            return "Preparing..."
+        } else if audioController.isPlaying && audioController.currentBookID == book.id {
             return "Pause"
         } else if currentProgress > 0 {
             return "Resume"
@@ -403,26 +427,29 @@ struct HomeView: View {
     }
     
     func openReader(_ book: BookMetadata) {
+        print("HOME VIEW AC ID:", ObjectIdentifier(audioController))
         if audioController.currentBookID != book.id {
             // Load logic is now integrated, or we can prep it first
             if let doc = loadDocument(for: book) {
-                // Fetch Cover
-                var coverImage: UIImage? = nil
-                if let coverURL = libraryManager.getCoverURL(for: book),
-                   let data = try? Data(contentsOf: coverURL) {
-                    coverImage = UIImage(data: data)
+                // 1. Immediately switch tab
+                self.selectedTab = 1
+                
+                // 2. Safely defer path presentation to the settled tab hierarchy
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    self.libraryPath = [.reader(doc, book)]
                 }
-                audioController.loadBook(text: doc.text, bookID: book.id, title: book.title, cover: coverImage, initialIndex: book.lastParagraphIndex)
-                if !audioController.isSessionActive {
-                    audioController.restorePosition(index: book.lastParagraphIndex)
-                }
-                self.navigationPath = [.reader(doc, book)]
             }
         } else {
              // Already loaded? Re-parse logic might be needed if we don't persist 'doc'
              // Ideally we shouldn't re-parse if unnecessary.
              if let doc = loadDocument(for: book) {
-                 self.navigationPath = [.reader(doc, book)]
+                 // 1. Immediately switch tab
+                 self.selectedTab = 1
+                 
+                 // 2. Safely defer path presentation
+                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                     self.libraryPath = [.reader(doc, book)]
+                 }
              }
         }
     }

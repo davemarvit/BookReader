@@ -31,6 +31,7 @@ enum PlaybackIntentSource {
     case skipResume
     case programmaticResume
     case modeSwitchRestart
+    case systemForcedFallback
 }
 
 /// Represents the explicit reason behind a voice mode switch

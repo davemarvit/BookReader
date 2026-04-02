@@ -1,3 +1,5 @@
+// EntitlementManager.swift
+
 import Foundation
 import Combine
 
@@ -6,6 +8,7 @@ final class EntitlementManager: ObservableObject {
     @Published var premiumEntitlement: PremiumEntitlementState = .requiresDecision
     @Published var lastResolvedSessionChoice: PlaybackGateChoice? = nil
     @Published var lastGateReason: String? = nil
+    @Published var showUpgradeBanner: Bool = false
 
     /// Determines if a gate interface must be shown before continuing playback in the requested mode.
     func requiresExplicitGate(for requestedMode: VoiceMode) -> Bool {

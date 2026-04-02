@@ -21,74 +21,104 @@ struct ContentView: View {
         Binding(
             get: { self.selectedTab },
             set: { newValue in
-                print("ContentView tabSelection set: old=\(self.selectedTab) new=\(newValue)")
-                // Only reset the path if tapping the ALREADY active tab (tap-to-root)
-                if newValue == self.selectedTab {
+                let oldValue = self.selectedTab
+                print("ContentView tabSelection set: old=\(oldValue) new=\(newValue)")
+                
+                // If double-tapping the current tab, naturally pop to root
+                if newValue == oldValue {
                     if newValue == 0 {
-                        print("ContentView clearing homeNavigationPath")
                         homeNavigationPath = []
                     } else if newValue == 1 {
-                        print("ContentView clearing libraryNavigationPath")
+                        libraryNavigationPath = []
+                    }
+                } else {
+                    // Cross-tab routing: Enforce clean boundaries by clearing the OUTGOING tab's path.
+                    // Clearing the *incoming* tab synchronously causes a ghost overlay bug on iOS 16+.
+                    if oldValue == 0 {
+                        homeNavigationPath = []
+                    } else if oldValue == 1 {
                         libraryNavigationPath = []
                     }
                 }
+                
                 self.selectedTab = newValue
                 print("ContentView tabSelection end: selectedTab=\(self.selectedTab) homePathCount=\(homeNavigationPath.count) libraryPathCount=\(libraryNavigationPath.count)")
             }
         )
     }
     
-    private func updateTabBarAppearance(for tab: Int) {
-        if AppConfig.shared.isMonetizationBeta && tab == 0 {
-            // Immersive background is only on Now Playing (tab 0)
-            UITabBar.appearance().unselectedItemTintColor = UIColor(white: 1.0, alpha: 0.6)
-        } else {
-            // Revert to system default
-            UITabBar.appearance().unselectedItemTintColor = .systemGray
+    private func applyTabBarAppearance(for tab: Int) {
+        guard AppConfig.shared.isMonetizationBeta else { return }
+        // Dispatched async so the UITabBarController is guaranteed to be in
+        // the view hierarchy before we walk it.
+        DispatchQueue.main.async {
+            TabBarAppearanceManager.apply(for: tab)
         }
     }
     
     var body: some View {
+        mainTabView
+            .onAppear {
+                if AppConfig.shared.isMonetizationBeta && !hasSeenLibraryWelcome {
+                    selectedTab = 1
+                }
+                applyTabBarAppearance(for: selectedTab)
+            }
+            .onChange(of: selectedTab) { newValue in
+                applyTabBarAppearance(for: newValue)
+                print("ContentView onChange(selectedTab): \(newValue) homePathCount=\(homeNavigationPath.count) libraryPathCount=\(libraryNavigationPath.count)")
+            }
+            .onChange(of: homeNavigationPath) { newValue in
+                print("ContentView onChange(homeNavigationPath): count=\(newValue.count)")
+            }
+            .onChange(of: libraryNavigationPath) { newValue in
+                print("ContentView onChange(libraryNavigationPath): count=\(newValue.count)")
+            }
+    }
+    
+    private var mainTabView: some View {
         TabView(selection: tabSelection) {
-            NavigationStack(path: $homeNavigationPath) {
-                HomeView(libraryManager: libraryManager, selectedTab: $selectedTab, navigationPath: $homeNavigationPath)
-            }
-            .tabItem {
-                Label("Now Playing", systemImage: "play.circle.fill")
-            }
-            .tag(0)
-            
-            NavigationStack(path: $libraryNavigationPath) {
-                LibraryView(libraryManager: libraryManager, navigationPath: $libraryNavigationPath)
-            }
-            .tabItem {
-                Label("Library", systemImage: "books.vertical.fill")
-            }
-            .tag(1)
-            
-            NavigationStack {
-                SettingsView()
-            }
-            .tabItem {
-                Label("Settings", systemImage: "gearshape.fill")
-            }
-            .tag(2)
+            homeTab
+            libraryTab
+            settingsTab
         }
-        .onAppear {
-            if AppConfig.shared.isMonetizationBeta && !hasSeenLibraryWelcome {
-                selectedTab = 1
-            }
-            updateTabBarAppearance(for: selectedTab)
+    }
+    
+    private var homeTab: some View {
+        NavigationStack(path: $homeNavigationPath) {
+            HomeView(
+                libraryManager: libraryManager,
+                selectedTab: $selectedTab,
+                navigationPath: $homeNavigationPath,
+                libraryPath: $libraryNavigationPath
+            )
         }
-        .onChange(of: selectedTab) { newValue in
-            updateTabBarAppearance(for: newValue)
-            print("ContentView onChange(selectedTab): \(newValue) homePathCount=\(homeNavigationPath.count) libraryPathCount=\(libraryNavigationPath.count)")
+        .tabItem {
+            Label("Now Playing", systemImage: "play.circle.fill")
         }
-        .onChange(of: homeNavigationPath) { newValue in
-            print("ContentView onChange(homeNavigationPath): count=\(newValue.count)")
+        .tag(0)
+    }
+    
+    private var libraryTab: some View {
+        NavigationStack(path: $libraryNavigationPath) {
+            LibraryView(
+                libraryManager: libraryManager,
+                navigationPath: $libraryNavigationPath
+            )
         }
-        .onChange(of: libraryNavigationPath) { newValue in
-            print("ContentView onChange(libraryNavigationPath): count=\(newValue.count)")
+        .tabItem {
+            Label("Library", systemImage: "books.vertical.fill")
         }
+        .tag(1)
+    }
+    
+    private var settingsTab: some View {
+        NavigationStack {
+            SettingsView()
+        }
+        .tabItem {
+            Label("Settings", systemImage: "gearshape.fill")
+        }
+        .tag(2)
     }
 }

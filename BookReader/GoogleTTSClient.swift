@@ -1,3 +1,5 @@
+//  GoogleTTSClient.swift
+
 import Foundation
 
 enum GoogleTTSError: Error, LocalizedError {
@@ -90,31 +92,20 @@ final class GoogleTTSClient: ObservableObject {
         let data: Data
         let response: URLResponse
         do {
-            print("GOOGLE_TTS: about to call session.dataTask")
-            let result: (Data, URLResponse) = try await withCheckedThrowingContinuation { continuation in
-                let task = session.dataTask(with: request) { d, r, e in
-                    if let e = e {
-                        continuation.resume(throwing: e)
-                    } else if let d = d, let r = r {
-                        continuation.resume(returning: (d, r))
-                    } else {
-                        continuation.resume(throwing: URLError(.badServerResponse))
-                    }
-                }
-                task.resume()
-            }
+            print("GOOGLE_TTS: about to call session.data")
+            let result = try await session.data(for: request)
             data = result.0
             response = result.1
-            print("GOOGLE_TTS: session.dataTask returned")
+            print("GOOGLE_TTS: session.data returned")
         } catch let error as URLError {
-            print("GOOGLE_TTS: session.dataTask threw URLError \(error.code.rawValue) \(error.localizedDescription)")
+            print("GOOGLE_TTS: session.data threw URLError \(error.code.rawValue) \(error.localizedDescription)")
             if error.code == .timedOut {
                 throw GoogleTTSError.timeout
             } else {
                 throw GoogleTTSError.network(error)
             }
         } catch {
-            print("GOOGLE_TTS: session.dataTask threw non-URLError \(error)")
+            print("GOOGLE_TTS: session.data threw non-URLError \(error)")
             throw GoogleTTSError.network(error)
         }
 

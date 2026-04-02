@@ -1,3 +1,5 @@
+// ReaderView.swift
+
 import SwiftUI
 
 struct ReaderView: View {
@@ -38,10 +40,11 @@ struct ReaderView: View {
             // Header
             Text(document.title)
                 .font(.headline)
+                .foregroundColor(settings.currentTheme.textColor)
                 .lineLimit(1)
-                .padding()
-            
-            Divider()
+                .padding(.top, 0)
+                .padding(.horizontal)
+                .padding(.bottom, 24)
             
             // Custom Search Bar
             if isSearching {
@@ -104,18 +107,12 @@ struct ReaderView: View {
             )
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
-                    if audioController.isLoading {
-                        HStack(spacing: 4) {
-                            Text("Preparing premium audio")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            AnimatedEllipsisView()
-                        }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 16)
-                        .background(Color(UIColor.secondarySystemBackground).opacity(0.85))
-                        .cornerRadius(12)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    // Loading block purposefully relocated to top header overlay to prevent text occlusion
+                    
+                    if audioController.entitlementManager.showUpgradeBanner {
+                        UpgradeBannerView()
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .padding(.bottom, 4)
                     }
                     
                     if showingControls {
@@ -137,24 +134,76 @@ struct ReaderView: View {
                 .animation(.easeInOut(duration: 0.2), value: audioController.isLoading)
             }
         } // End Main VStack
+        .overlay(alignment: .top) {
+            // Enhanced Overlay Top Status Indicator - Theme Adaptive High Contrast
+            if audioController.isLoading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: settings.currentTheme.backgroundColor))
+                        .scaleEffect(0.7)
+                    Text("Preparing enhanced audio...")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(settings.currentTheme.backgroundColor)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 16)
+                .background(
+                    Capsule()
+                        .fill(settings.currentTheme.textColor.opacity(0.85))
+                        .shadow(color: Color.black.opacity(0.2), radius: 4, y: 2)
+                )
+                .padding(.top, 12)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
         .background(settings.currentTheme.backgroundColor.edgesIgnoringSafeArea(.all))
         .preferredColorScheme((settings.readerTheme == "dark" || settings.readerTheme == "lowContrastDark") ? .dark : (settings.readerTheme == "system" ? nil : .light))
         .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
         }
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                // Sleep Timer Menu
+                Menu {
+                    if audioController.sleepTimerActive {
+                        Button("Cancel Timer", role: .destructive) {
+                            audioController.cancelSleepTimer()
+                        }
+                        Divider()
+                    }
+                    Button("15 Minutes") { audioController.startSleepTimer(minutes: 15) }
+                    Button("30 Minutes") { audioController.startSleepTimer(minutes: 30) }
+                    Button("45 Minutes") { audioController.startSleepTimer(minutes: 45) }
+                    Button("60 Minutes") { audioController.startSleepTimer(minutes: 60) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: audioController.sleepTimerActive ? "moon.fill" : "moon")
+                        if audioController.sleepTimerActive {
+                            Text(audioController.sleepTimerString)
+                                .font(.caption.monospacedDigit())
+                        }
+                    }
+                    .foregroundColor(audioController.sleepTimerActive ? .accentColor : settings.currentTheme.textColor)
+                }
+            }
+            
             ToolbarItem(placement: .principal) {
                 Button(action: { showingVoiceModeSheet = true }) {
                     Text(voiceModeLabel)
-                        .font(.caption)
-                        .bold()
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.secondary.opacity(0.2))
-                        .cornerRadius(8)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(settings.currentTheme.textColor.opacity(0.1))
+                        .cornerRadius(12)
+                        .layoutPriority(1)
                 }
                 .foregroundColor(settings.currentTheme.textColor)
             }
+            
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 16) {
                     if isSearching && !searchResults.isEmpty {
@@ -169,29 +218,6 @@ struct ReaderView: View {
                         Button(action: { nextMatch() }) {
                             Image(systemName: "chevron.down")
                         }
-                    }
-                    
-                    // Sleep Timer Menu
-                    Menu {
-                        if audioController.sleepTimerActive {
-                            Button("Cancel Timer", role: .destructive) {
-                                audioController.cancelSleepTimer()
-                            }
-                            Divider()
-                        }
-                        Button("15 Minutes") { audioController.startSleepTimer(minutes: 15) }
-                        Button("30 Minutes") { audioController.startSleepTimer(minutes: 30) }
-                        Button("45 Minutes") { audioController.startSleepTimer(minutes: 45) }
-                        Button("60 Minutes") { audioController.startSleepTimer(minutes: 60) }
-                    } label: {
-                        HStack(spacing: 4) {
-                            if audioController.sleepTimerActive {
-                                Text(audioController.sleepTimerString)
-                                    .font(.caption.monospacedDigit())
-                                }
-                            Image(systemName: audioController.sleepTimerActive ? "moon.fill" : "moon")
-                        }
-                        .foregroundColor(audioController.sleepTimerActive ? .accentColor : (isSearching ? .primary : settings.currentTheme.textColor))
                     }
                     
                     // Search Button
@@ -293,25 +319,34 @@ struct ReaderView: View {
                         .font(.headline)
                         .padding(.top)
 
+                    if audioController.playbackState.availability == .temporarilyUnavailable {
+                        Text("We’re having trouble connecting to the server. As soon as the connection is restored, Enhanced Audio will resume.")
+                            .font(.callout)
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal)
+                    }
+
                     if audioController.voiceModeController.activeMode == .premium && settings.hasValidGoogleKey {
-                        Button("Switch to Standard") {
+                        Button("Switch to Basic Audio") {
                             settings.preferredEngine = "apple"
                             audioController.handleManualVoiceSwitch(to: .standard)
                             showingVoiceModeSheet = false
                         }
                         .buttonStyle(.bordered)
                     } else if settings.hasValidGoogleKey {
-                        Button("Switch to Premium") {
+                        Button("Switch to Enhanced Audio") {
                             settings.preferredEngine = "google"
                             audioController.handleManualVoiceSwitch(to: .premium)
                             showingVoiceModeSheet = false
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(audioController.playbackState.availability == .limitReached)
                     }
                     
                     Spacer()
                 }
-                .navigationTitle("Voice Mode")
+                .navigationTitle("Audio Mode")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -319,26 +354,43 @@ struct ReaderView: View {
                     }
                 }
             }
-            .presentationDetents([.fraction(0.35), .medium])
+            
+            .presentationDetents([.fraction(0.4), .medium])
+        }
+        .sheet(item: $audioController.activeGate) { gate in
+            VStack(spacing: 24) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 64))
+                    .foregroundColor(.orange)
+                    .padding(.bottom, 8)
+                Text("Enhanced Audio Limit Reached")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                Text("You’ve reached the limit of your Enhanced audio. You can upgrade or continue with Basic audio.")
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal)
+                
+                VStack(spacing: 12) {
+                    Button("Continue with Basic Audio") {
+                        audioController.gateController.resolvePendingGate(with: .standard)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    
+                    Button("Upgrade (Coming Soon)") {
+                        audioController.gateController.resolvePendingGate(with: .cancel)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(32)
+            .interactiveDismissDisabled()
         }
     } // End Body
     
     var voiceModeLabel: String {
-        let isPremiumMode = audioController.resolvedPlaybackMode == .premium
-        let hasKey = settings.hasValidGoogleKey
-        let isUnavailable = audioController.voiceModeController.isPremiumTemporarilyUnavailable
-        
-        if isPremiumMode && hasKey && !isUnavailable {
-            return "Premium Audio"
-        } else if hasKey {
-            if isUnavailable {
-                return "Standard Audio · Premium Unavailable"
-            } else {
-                return "Standard Audio · Premium Available"
-            }
-        } else {
-            return "Standard Audio"
-        }
+        return audioController.playbackState.bannerText
     }
     
     func getParagraph(at index: Int) -> String {
@@ -410,12 +462,13 @@ struct ReaderTextView: View {
     @Binding var targetScrollIndex: Int?
     
     var body: some View {
+        let _ = print("READER BODY: totalParagraphs=\(audioController.totalParagraphs) paragraphs=\(audioController.paragraphs.count)")
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    ForEach(0..<audioController.totalParagraphs, id: \.self) { (index: Int) in
+                    ForEach(Array(audioController.paragraphs.enumerated()), id: \.offset) { index, paragraph in
                         ParagraphRow(
-                            text: audioController.paragraphs[index],
+                            text: paragraph,
                             index: index,
                             currentIndex: audioController.currentParagraphIndex,
                             searchText: searchText,
@@ -427,7 +480,9 @@ struct ReaderTextView: View {
                         }
                     }
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.top, 4)
+                .padding(.bottom, 24)
             }
             .onChange(of: targetScrollIndex) { _, index in
                 if let idx = index {
@@ -448,33 +503,88 @@ struct ReaderTextView: View {
                     proxy.scrollTo(newIndex, anchor: .center)
                 }
             }
-            .onAppear {
-                print("ReaderTextView minimal body active")
-                if let book = libraryManager.books.first(where: { $0.id == bookID }) {
-                    // Fetch Cover
-                    var coverImage: UIImage? = nil
-                    if let coverURL = libraryManager.getCoverURL(for: book),
+            .task {
+                print("BOOK PREP START")
+                print("READER TEXT VIEW AC ID:", ObjectIdentifier(audioController))
+                
+                // 1. Heavy work OFF main thread
+                let coverImage: UIImage? = {
+                    if let book = libraryManager.books.first(where: { $0.id == bookID }),
+                       let coverURL = libraryManager.getCoverURL(for: book),
                        let data = try? Data(contentsOf: coverURL) {
-                        coverImage = UIImage(data: data)
+                        return UIImage(data: data)
                     }
+                    return nil
+                }()
+                
+                let book = libraryManager.books.first(where: { $0.id == bookID })
+                
+                // Pure statically parsed state decoupled from the AudioController class properties
+                let prepared = audioController.prepareBookContent(
+                    text: document.text,
+                    bookID: bookID,
+                    title: book?.title ?? document.title,
+                    cover: coverImage,
+                    initialIndex: book?.lastParagraphIndex ?? 0
+                )
+                print("BOOK PREP DONE:", prepared.paragraphs.count)
+                
+                // 2. UI mutation ON main thread
+                await MainActor.run {
+                    audioController.applyBookContent(prepared)
                     
-                    audioController.loadBook(
-                        text: document.text,
-                        bookID: bookID,
-                        title: book.title,
-                        cover: coverImage,
-                        initialIndex: book.lastParagraphIndex
-                    )
-                } else {
-                    audioController.loadBook(
-                        text: document.text,
-                        bookID: bookID,
-                        title: document.title,
-                        cover: nil
-                    )
+                    if let index = book?.lastParagraphIndex, !audioController.isSessionActive {
+                        audioController.restorePosition(index: index)
+                    }
+                    print("BOOK APPLY DONE")
+                    
+                    // Immediately synchronize text view back down to the actively running playhead
+                    proxy.scrollTo(audioController.currentParagraphIndex, anchor: .center)
                 }
             }
         }
+    }
+}
+
+struct UpgradeBannerView: View {
+    @EnvironmentObject var audioController: AudioController
+    @ObservedObject var settings = SettingsManager.shared
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "sparkles")
+                .foregroundColor(.yellow)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Enhanced Audio Ended")
+                    .font(.subheadline.bold())
+                Text("Playing Basic audio. Upgrade to resume.")
+                    .font(.caption)
+                    .foregroundColor(settings.currentTheme.textColor.opacity(0.8))
+                    .lineLimit(1)
+            }
+            Spacer()
+            
+            Button("Upgrade") {
+                // Future monetization hook / Launch paywall
+                audioController.entitlementManager.showUpgradeBanner = false
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            
+            Button {
+                withAnimation { audioController.entitlementManager.showUpgradeBanner = false }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.callout)
+                    .foregroundColor(settings.currentTheme.textColor.opacity(0.6))
+                    .padding(.leading, 4)
+            }
+        }
+        .padding(12)
+        .background(settings.currentTheme.backgroundColor)
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.15), radius: 8, y: 4)
+        .padding(.horizontal)
     }
 }
 
@@ -601,37 +711,13 @@ struct ParagraphRow: View {
     let currentIndex: Int
     let searchText: String
     let isSearchResult: Bool
-    
+
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            // Elegant leading vertical bar that fades in when active
-            RoundedRectangle(cornerRadius: 2)
-                .fill(settings.currentTheme.textColor.opacity(0.6))
-                .frame(width: 4)
-                .padding(.vertical, 6)
-                .padding(.trailing, 12)
-                .opacity(index == currentIndex ? 1.0 : 0.0)
-            
-            Text(highlightObject(for: text, query: searchText))
-                .font(settings.currentFont)
-                .foregroundColor(settings.currentTheme.textColor)
-                .lineSpacing(6)
-                .padding(4)
-                .background(
-                    isSearchResult ? settings.currentTheme.textColor.opacity(0.1) : Color.clear
-                )
-                .cornerRadius(4)
-                .textSelection(.enabled)
-        }
-            .background(
-                GeometryReader { geo in
-                    Color.clear.preference(
-                        key: ViewOffsetKey.self,
-                        value: [index: geo.frame(in: .named("ScrollView")).minY]
-                    )
-                }
-            )
+        let _ = print("PARAGRAPH ROW: index=\(index) textCount=\(text.count)")
+        Text(text)
+            .padding(4)
     }
+}
     
     func highlightObject(for text: String, query: String) -> AttributedString {
         var attributed = AttributedString(text)
@@ -647,7 +733,6 @@ struct ParagraphRow: View {
         }
         return attributed
     }
-}
 
 struct ViewOffsetKey: PreferenceKey {
     static var defaultValue: [Int: CGFloat] = [:]

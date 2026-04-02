@@ -44,6 +44,8 @@ class AudioController: NSObject, ObservableObject {
     let entitlementManager = EntitlementManager()
     let gateController = PlaybackGateController()
     let voiceModeController = VoiceModeController()
+    
+    @Published var activeGate: PendingPlaybackGate?
 
     private var premiumCapabilityAvailable: Bool { settings.hasValidGoogleKey }
     
@@ -52,6 +54,26 @@ class AudioController: NSObject, ObservableObject {
         let isReady = premiumCapabilityAvailable && !voiceModeController.isPremiumTemporarilyUnavailable
         let targetMode = isSessionActive ? voiceModeController.activeMode : settings.preferredVoiceMode
         return (targetMode == .premium && isReady) ? .premium : .standard
+    }
+    
+    /// Single Source of Truth for system-wide playback and banner state
+    var playbackState: PlaybackState {
+        // [Temporary Compatibility Bridge]
+        // Mapping legacy VoiceMode resolution to the new PlaybackMode vocabulary
+        let mode: PlaybackMode = (resolvedPlaybackMode == .premium) ? .enhanced : .basic
+        
+        let availability: EnhancedAvailability
+        if !settings.hasValidGoogleKey {
+            availability = .notIncluded
+        } else if entitlementManager.premiumEntitlement == .standardOnly && entitlementManager.lastGateReason == "quota_exhausted" {
+            availability = .limitReached
+        } else if voiceModeController.isPremiumTemporarilyUnavailable {
+            availability = .temporarilyUnavailable
+        } else {
+            availability = .available
+        }
+        
+        return PlaybackState(mode: mode, availability: availability)
     }
     
     private var isPremiumActiveMode: Bool { resolvedPlaybackMode == .premium }
@@ -64,13 +86,12 @@ class AudioController: NSObject, ObservableObject {
     @Published var currentBookID: UUID?
     @Published var bookTitle: String = ""
     @Published var coverImage: UIImage?
+    var paragraphs: [String] = []
 
     var progress: Double {
         guard totalParagraphs > 0 else { return 0 }
         return Double(currentParagraphIndex) / Double(totalParagraphs)
     }
-
-    var paragraphs: [String] = []
 
     // MARK: - Audio Engines
 
@@ -104,9 +125,13 @@ class AudioController: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        setupAudioSession()
-        setupRemoteCommandCenter()
+        // setupAudioSession()
+        // setupRemoteCommandCenter()
         localSynthesizer.delegate = self
+
+        gateController.$pendingGate
+            .receive(on: DispatchQueue.main)
+            .assign(to: &$activeGate)
 
         player.automaticallyWaitsToMinimizeStalling = false
 
@@ -136,27 +161,48 @@ class AudioController: NSObject, ObservableObject {
                 } else if player.currentItem == nil && self.voiceModeController.requestedMode == .premium {
                     guard self.highestEnqueuedIndex != -1 else { return }
 
-                    logControlState(event: "queue_empty", reason: "starvation")
-                    
-                    let completedIndex = self.currentParagraphIndex
-                    AppLogger.logEvent("PLAYBACK_FINISH", metadata: ["index": completedIndex])
-
-                    if self.isSessionActive && completedIndex < self.paragraphs.count - 1 {
-                        let nextReq = completedIndex + 1
-                        AppLogger.logEvent("QUEUE_STARVATION_START", metadata: ["nextRequiredIndex": nextReq, "queueCount": 0])
-                        self.starvationStartTime = Date()
+                    if self.playbackState.availability == .limitReached {
+                        self.handleLimitReachedBoundary()
+                    } else {
+                        self.logControlState(event: "queue_empty", reason: "starvation")
                         
-                        // If the physical AVPlayer queue runs completely dry mid-book, the network failed 
-                        // real-time requirements. Atomically commit paragraph completion and fallback.
-                        self.voiceModeController.markPremiumTemporarilyUnavailable(true)
-                        AppLogger.logEvent("FALLBACK_TRIGGERED_ON_STARVATION", metadata: ["index": nextReq])
-                        self.logControlState(event: "fallback_committed", reason: "queue_empty", extra: ["nextReq": nextReq])
-                        self.transitionAndContinuePlayback(to: nextReq, shouldPlay: true, markTemporarilyUnavailable: true)
-                    }
+                        let completedIndex = self.currentParagraphIndex
+                        AppLogger.logEvent("PLAYBACK_FINISH", metadata: ["index": completedIndex])
 
-                    if self.currentParagraphIndex >= self.paragraphs.count - 1 {
-                        self.isPlaying = false
-                        self.isSessionActive = false
+                        if self.isSessionActive && completedIndex < self.paragraphs.count - 1 {
+                            let nextReq = completedIndex + 1
+                            AppLogger.logEvent("QUEUE_STARVATION_START", metadata: ["nextRequiredIndex": nextReq, "queueCount": 0])
+                            self.starvationStartTime = Date()
+                            
+                            let waitTime = min(2.0, self.avgTTSDurationSeconds * 0.3)
+                            let expectedGen = self.playbackGeneration
+                            self.isLoading = true
+                            
+                            Task { @MainActor [weak self] in
+                                guard let self = self else { return }
+                                
+                                try? await Task.sleep(nanoseconds: UInt64(waitTime * 1_000_000_000))
+                                
+                                guard self.playbackGeneration == expectedGen, self.isSessionActive else { return }
+                                
+                                if self.player.items().isEmpty {
+                                    self.voiceModeController.markPremiumTemporarilyUnavailable(true)
+                                    AppLogger.logEvent("FALLBACK_TRIGGERED_ON_STARVATION", metadata: ["index": nextReq])
+                                    self.logControlState(event: "fallback_committed", reason: "queue_empty", extra: ["nextReq": nextReq])
+                                    self.transitionAndContinuePlayback(to: nextReq, shouldPlay: true, markTemporarilyUnavailable: true)
+                                } else {
+                                    self.isLoading = false
+                                    if self.isPlaying && self.player.timeControlStatus != .playing {
+                                        self.player.play()
+                                    }
+                                }
+                            }
+                        }
+
+                        if self.currentParagraphIndex >= self.paragraphs.count - 1 {
+                            self.isPlaying = false
+                            self.isSessionActive = false
+                        }
                     }
                 }
             }
@@ -169,6 +215,17 @@ class AudioController: NSObject, ObservableObject {
                 self.updateDiagnosticDetails()
                 guard self.isPlaying else { return }
                 StatsManager.shared.logReadingTime(seconds: 1.0)
+                
+                if self.isPremiumActiveMode {
+                    var bufferedSeconds = 0.0
+                    if self.highestEnqueuedIndex >= self.currentParagraphIndex {
+                        let text = self.paragraphs[self.currentParagraphIndex...self.highestEnqueuedIndex].joined(separator: " ")
+                        bufferedSeconds = self.estimatePlaybackDuration(for: text)
+                    }
+                    if bufferedSeconds < 2.0 {
+                        print("WARNING: bufferedSeconds < 2.0 during playback (buffered: \(bufferedSeconds))")
+                    }
+                }
             }
             .store(in: &cancellables)
     }
@@ -245,24 +302,40 @@ class AudioController: NSObject, ObservableObject {
 
     // MARK: - Playback Logic
 
-    func loadBook(text: String, bookID: UUID, title: String, cover: UIImage?, initialIndex: Int = 0) {
-        if self.currentBookID == bookID && !self.paragraphs.isEmpty {
+    struct PreparedBookContent {
+        let bookID: UUID
+        let title: String
+        let cover: UIImage?
+        let paragraphs: [String]
+        let safeInitialIndex: Int
+        let rawInitialIndex: Int
+    }
+
+    nonisolated func prepareBookContent(text: String, bookID: UUID, title: String, cover: UIImage?, initialIndex: Int = 0) -> PreparedBookContent {
+        let paragraphs = text.components(separatedBy: "\n\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let safeIndex = (initialIndex >= 0 && initialIndex < (paragraphs.isEmpty ? 1 : paragraphs.count)) ? initialIndex : 0
+        return PreparedBookContent(bookID: bookID, title: title, cover: cover, paragraphs: paragraphs, safeInitialIndex: safeIndex, rawInitialIndex: initialIndex)
+    }
+
+    func applyBookContent(_ prepared: PreparedBookContent) {
+        print("AUDIO CONTROLLER APPLY ID:", ObjectIdentifier(self))
+        if self.currentBookID == prepared.bookID && !self.paragraphs.isEmpty {
+            print("SKIPPING APPLY — SAME BOOK")
             return
         }
 
         self.stopEverything()
 
-        self.currentBookID = bookID
-        self.bookTitle = title
-        self.coverImage = cover
-        self.paragraphs = text.components(separatedBy: "\n\n").filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        self.currentBookID = prepared.bookID
+        self.bookTitle = prepared.title
+        self.coverImage = prepared.cover
+        self.paragraphs = prepared.paragraphs
         self.totalParagraphs = self.paragraphs.count
 
-        let safeIndex = (initialIndex >= 0 && initialIndex < self.paragraphs.count) ? initialIndex : 0
-        self.currentParagraphIndex = safeIndex
+        self.currentParagraphIndex = prepared.safeInitialIndex
 
-        if safeIndex != initialIndex {
-            libraryManager?.updateProgress(for: bookID, index: safeIndex)
+        if prepared.safeInitialIndex != prepared.rawInitialIndex {
+            libraryManager?.updateProgress(for: prepared.bookID, index: prepared.safeInitialIndex)
         }
 
         self.audioCache.removeAll()
@@ -271,8 +344,11 @@ class AudioController: NSObject, ObservableObject {
         self.playbackGeneration = UUID()
         self.highestEnqueuedIndex = -1
         self.queueMaintenanceTask?.cancel()
+    }
 
-        // Intentionally no premium prefetch on load.
+    func loadBook(text: String, bookID: UUID, title: String, cover: UIImage?, initialIndex: Int = 0) {
+        let prepared = prepareBookContent(text: text, bookID: bookID, title: title, cover: cover, initialIndex: initialIndex)
+        applyBookContent(prepared)
     }
 
     func play(source: PlaybackIntentSource = .playButton) {
@@ -352,6 +428,7 @@ class AudioController: NSObject, ObservableObject {
         appleTTSDebounceTimer?.invalidate()
         currentAppleUtterance = nil
         localSynthesizer.stopSpeaking(at: .immediate)
+        isAwaitingQuotaDecision = false
     }
 
     // MARK: - Navigation
@@ -658,12 +735,35 @@ class AudioController: NSObject, ObservableObject {
             }
 
             loadingTask.cancel()
-            isLoading = false
-
             player.defaultRate = playbackRate
+
             if startPlaying {
-                player.play()
+                self.isLoading = true // keep spinner visible while buffering
+                
+                var waitLoops = 0
+                while self.playbackGeneration == expectedGen && waitLoops < 80 { // ~8 seconds max wait for slow networks
+                    let startIndex = index
+                    let endIndex = self.highestEnqueuedIndex
+                    
+                    if endIndex >= startIndex {
+                        let bufferedText = self.paragraphs[startIndex...endIndex].joined(separator: " ")
+                        if self.estimatePlaybackDuration(for: bufferedText) >= 10.0 || endIndex >= self.paragraphs.count - 1 {
+                            break
+                        }
+                    }
+                    
+                    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                    waitLoops += 1
+                }
+                
+                if self.playbackGeneration == expectedGen {
+                    self.isLoading = false
+                    player.play()
+                }
+            } else {
+                self.isLoading = false
             }
+
             player.rate = playbackRate
 
         } catch let caughtError {
@@ -687,58 +787,180 @@ class AudioController: NSObject, ObservableObject {
             if isTransient {
                 transitionAndContinuePlayback(to: currentParagraphIndex, shouldPlay: true, markTemporarilyUnavailable: true)
             } else {
-                isPlaying = false
-                errorMessage = caughtError.localizedDescription
+                if let gError = caughtError as? GoogleTTSError, case .quotaExceeded = gError {
+                    entitlementManager.downgradeToStandard(reason: "quota_exhausted")
+                } else {
+                    isPlaying = false
+                    errorMessage = caughtError.localizedDescription
+                }
             }
             print("[RECOVERY_TRACE] EnqueueAndPlay catch: idx=\(currentParagraphIndex) err=\(caughtError.localizedDescription) trans=\(isTransient) activeMode=\(voiceModeController.activeMode)")
         }
     }
 
-    private func maintainQueue(currentIndex: Int) async {
-        let lookahead = 5
-        var tasks: [(Int, Task<URL, Error>)] = []
+    private var lastTTSDurations: [Double] = []
+    private var avgTTSDurationSeconds: Double {
+        guard !lastTTSDurations.isEmpty else { return 2.0 }
+        return lastTTSDurations.reduce(0.0, +) / Double(lastTTSDurations.count)
+    }
 
-        for i in 1...lookahead {
-            let nextIndex = currentIndex + i
-            guard nextIndex < paragraphs.count else { break }
-            let task = ensureAudioTask(for: nextIndex)
-            tasks.append((nextIndex, task))
+    private func recordTTSDuration(_ durationSeconds: Double) {
+        lastTTSDurations.append(durationSeconds)
+        if lastTTSDurations.count > 5 {
+            lastTTSDurations.removeFirst()
         }
+    }
 
+
+    private func estimatePlaybackDuration(for text: String) -> Double {
+        let charsPerSecond = 15.0 // Base: 15 characters per second
+        return (Double(text.count) / charsPerSecond) / Double(playbackRate)
+    }
+
+    private func maintainQueue(currentIndex: Int) async {
         let expectedGen = playbackGeneration
-        for (nextIndex, task) in tasks {
-            do {
-                let url = try await task.value
+        
+        await withTaskGroup(of: (Int, URL?, Error?).self) { group in
+            var pendingInserts: [Int: URL] = [:]
+            var inFlight: Set<Int> = []
+            var failureCounts: [Int: Int] = [:]
+            var nextIndex = highestEnqueuedIndex + 1
+            var lastAdvanceTime = Date()
+            var hasLoggedStall = false
+            
+            // Prime initial tasks
+            for _ in 0..<5 {
+                let nextRequiredIndex = highestEnqueuedIndex + 1
+                var indexToLaunch: Int
+                
+                if nextRequiredIndex < paragraphs.count && !inFlight.contains(nextRequiredIndex) && pendingInserts[nextRequiredIndex] == nil {
+                    indexToLaunch = nextRequiredIndex
+                    if nextIndex == nextRequiredIndex { nextIndex += 1 }
+                } else {
+                    indexToLaunch = nextIndex
+                    nextIndex += 1
+                }
+                
+                guard indexToLaunch < paragraphs.count else { break }
+                if inFlight.contains(indexToLaunch) { continue }
+                inFlight.insert(indexToLaunch)
+                
+                let captureIndex = indexToLaunch
+                group.addTask {
+                    do {
+                        let url = try await self.ensureAudioTask(for: captureIndex).value
+                        return (captureIndex, url, nil)
+                    } catch {
+                        return (captureIndex, nil, error)
+                    }
+                }
+            }
+            
+            while let (completedIndex, url, error) = await group.next() {
+                inFlight.remove(completedIndex)
+                
                 if Task.isCancelled || playbackGeneration != expectedGen {
-                    AppLogger.logEvent("MAINTAIN_QUEUE_CANCELLED", metadata: ["index": nextIndex])
+                    group.cancelAll()
                     return
                 }
-
-                let items = player.items()
-                let alreadyQueued = items.contains { itemIndexMap[$0] == nextIndex }
-                let isMonotonicallyValid = nextIndex > highestEnqueuedIndex
                 
-                if !alreadyQueued && isMonotonicallyValid {
-                    let newItem = AVPlayerItem(url: url)
-                    itemIndexMap[newItem] = nextIndex
-                    highestEnqueuedIndex = nextIndex
-                    AppLogger.logEvent("AUDIO_ENQUEUED", metadata: ["index": nextIndex, "reason": "monotonic_guard_passed"])
-
+                if let error = error {
+                    if let gError = error as? GoogleTTSError, case .quotaExceeded = gError {
+                        entitlementManager.downgradeToStandard(reason: "quota_exhausted")
+                    }
+                    
+                    failureCounts[completedIndex, default: 0] += 1
+                    if failureCounts[completedIndex, default: 0] >= 2 {
+                        if completedIndex == highestEnqueuedIndex + 1 {
+                            AppLogger.logEvent("NEXT_REQUIRED_FAILED_TWICE", metadata: ["index": completedIndex])
+                            Task { @MainActor [weak self] in
+                                self?.voiceModeController.markPremiumTemporarilyUnavailable(true)
+                            }
+                            group.cancelAll()
+                            return
+                        } else {
+                            AppLogger.logEvent("TTS_SKIP_AFTER_RETRY", metadata: ["index": completedIndex])
+                        }
+                    } else {
+                        AppLogger.logEvent("TTS_REQUEST_FAILED_CONTINUE", metadata: ["index": completedIndex])
+                    }
+                } else if let url = url {
+                    pendingInserts[completedIndex] = url
+                }
+                
+                // Sequential enqueue
+                var checkIndex = highestEnqueuedIndex + 1
+                while let readyUrl = pendingInserts[checkIndex] {
+                    pendingInserts.removeValue(forKey: checkIndex)
+                    
+                    let newItem = AVPlayerItem(url: readyUrl)
+                    itemIndexMap[newItem] = checkIndex
+                    highestEnqueuedIndex = checkIndex
+                    lastAdvanceTime = Date()
+                    hasLoggedStall = false
+                    
+                    let items = player.items()
                     if let last = items.last {
                         player.insert(newItem, after: last)
                     } else {
                         player.insert(newItem, after: nil)
                     }
-                    AppLogger.logEvent("QUEUE_COUNT", metadata: ["count": player.items().count])
-                } else if !alreadyQueued && !isMonotonicallyValid {
-                    AppLogger.logEvent("ENQUEUE_REJECTED", metadata: ["index": nextIndex, "highestEnqueuedIndex": highestEnqueuedIndex, "reason": "stale_index_chronology"])
+                    
+                    checkIndex += 1
                 }
-            } catch {
-                if Task.isCancelled || playbackGeneration != expectedGen { return }
-                // Do not trigger aggressive fallback on single fetch failure or minor network jitter.
-                // Allow the player to seamlessly consume remaining buffered premium chunks.
-                // True exhaustion fallback is cleanly handled by the playerItemObservation QUEUE_EMPTY boundary.
-                return // Stop attempting to fill the queue
+                
+                if !pendingInserts.isEmpty && pendingInserts[highestEnqueuedIndex + 1] == nil {
+                    AppLogger.logEvent("PENDING_BLOCKED", metadata: [
+                        "waitingFor": highestEnqueuedIndex + 1,
+                        "available": pendingInserts.keys.sorted()
+                    ])
+                    
+                    if Date().timeIntervalSince(lastAdvanceTime) > 3.0 && !hasLoggedStall {
+                        AppLogger.logEvent("BUFFER_STALLED", metadata: [
+                            "highestEnqueuedIndex": highestEnqueuedIndex,
+                            "pending": pendingInserts.keys.sorted()
+                        ])
+                        hasLoggedStall = true
+                    }
+                }
+                
+                // Recompute REAL buffer
+                var bufferedSeconds: Double = 0.0
+                if highestEnqueuedIndex >= currentIndex {
+                    let bufferedText = paragraphs[currentIndex...highestEnqueuedIndex].joined(separator: " ")
+                    bufferedSeconds = estimatePlaybackDuration(for: bufferedText)
+                }
+                
+                if bufferedSeconds >= 60.0 {
+                    group.cancelAll()
+                    return
+                }
+                
+                // Launch next task to maintain concurrency
+                let nextRequiredIndex = highestEnqueuedIndex + 1
+                var indexToLaunch: Int
+                
+                if nextRequiredIndex < paragraphs.count && !inFlight.contains(nextRequiredIndex) && pendingInserts[nextRequiredIndex] == nil {
+                    indexToLaunch = nextRequiredIndex
+                    if nextIndex == nextRequiredIndex { nextIndex += 1 }
+                } else {
+                    indexToLaunch = nextIndex
+                    nextIndex += 1
+                }
+                
+                if indexToLaunch < paragraphs.count {
+                    if inFlight.contains(indexToLaunch) { continue }
+                    inFlight.insert(indexToLaunch)
+                    let captureIndex = indexToLaunch
+                    group.addTask {
+                        do {
+                            let url = try await self.ensureAudioTask(for: captureIndex).value
+                            return (captureIndex, url, nil)
+                        } catch {
+                            return (captureIndex, nil, error)
+                        }
+                    }
+                }
             }
         }
     }
@@ -829,7 +1051,12 @@ class AudioController: NSObject, ObservableObject {
         let cInt = player.currentItem != nil ? 1 : 0
         let stat = isPlaying ? "Playing" : "Paused"
 
-        diagnosticDetails = "Engine: \(engine) | Slider: \(pRate) | True Rate: \(aRate) | Queue: \(cInt) | \(stat)"
+        let newDetails = "Engine: \(engine) | Slider: \(pRate) | True Rate: \(aRate) | Queue: \(cInt) | \(stat)"
+        
+        // Prevents redundant root-level objectWillChange spam destroying keyboard focus
+        if diagnosticDetails != newDetails {
+            diagnosticDetails = newDetails
+        }
     }
     
     private func logControlState(event: String, reason: String? = nil, extra: [String: Any] = [:]) {
@@ -1053,6 +1280,8 @@ class AudioController: NSObject, ObservableObject {
                 ])
 
                 Task { @MainActor in
+                    let durationSec = Double(durationMs) / 1000.0
+                    self.recordTTSDuration(durationSec)
                     self.logControlState(event: "fetch_success", extra: ["durMs": durationMs, "bytes": data.count])
                 }
                 print("[BookReader][TTS_METRIC] index=\(index) chars=\(chars) words=\(words) sentences=\(sentences) speed=\(currentSpeed) durationMs=\(durationMs) audioBytes=\(data.count) success=true isNextRequired=\(isNextReq) queueCount=\(qCount) nextRequiredIndex=\(nextReq) bufferedAheadCount=\(bufferedAhead)")
@@ -1203,6 +1432,59 @@ class AudioController: NSObject, ObservableObject {
         }
     }
 
+    private var isAwaitingQuotaDecision = false
+    private var exhaustionAudioPlayer: AVAudioPlayer?
+    
+    private func handleLimitReachedBoundary() {
+        guard !isAwaitingQuotaDecision else { return }
+        isAwaitingQuotaDecision = true
+        
+        // Remove hard pause commands to sustain background networking integrity
+        let completedIndex = self.currentParagraphIndex
+        let hasNextParagraph = completedIndex < self.paragraphs.count - 1
+        let targetIndex = hasNextParagraph ? completedIndex + 1 : completedIndex
+        
+        Task { @MainActor in
+            // Emit non-blocking inline visual indication passively
+            self.entitlementManager.showUpgradeBanner = true
+            
+            // Hard bind the Voice Mode constraint internally
+            self.voiceModeController.forceMode(.standard)
+            
+            var delaySeconds: Double = 0.0
+            
+            // Render High-Fidelity Out-of-Band Notification implicitly
+            if let alertURL = Bundle.main.url(forResource: "exhaustion_alert", withExtension: "mp3") {
+                do {
+                    let player = try AVAudioPlayer(contentsOf: alertURL)
+                    self.exhaustionAudioPlayer = player
+                    player.play()
+                    delaySeconds = player.duration + 0.1
+                } catch {
+                    print("Failed to play exhaustion audio: \(error)")
+                }
+            } else {
+                print("No exhaustion_alert.mp3 found in bundle.")
+            }
+            
+            // Suspend transition synchronization exactly mapped to audio notification bounds
+            if delaySeconds > 0 {
+                try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+            }
+            
+            self.isAwaitingQuotaDecision = false
+            self.exhaustionAudioPlayer = nil
+            
+            // Conclude boundary seamlessly dumping the fetched pipeline exclusively
+            if hasNextParagraph {
+                self.transitionAndContinuePlayback(to: targetIndex, shouldPlay: true, markTemporarilyUnavailable: false)
+            } else {
+                self.isPlaying = false
+                self.isSessionActive = false
+            }
+        }
+    }
+
     func cancelSleepTimer() {
         sleepTimer?.invalidate()
         sleepTimer = nil
@@ -1254,4 +1536,5 @@ extension AudioController: @preconcurrency AVSpeechSynthesizerDelegate {
     }
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) { if !isTransitioningPlayback { isPlaying = false } }
 }
+
 

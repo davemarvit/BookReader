@@ -165,7 +165,9 @@ class DocumentParser {
                 fullText += pageText + "\n\n"
             }
         }
-        let title = pdf.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String ?? url.lastPathComponent
+        let rawTitle = pdf.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String
+        let cleanTitle = rawTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = cleanTitle.isEmpty ? url.deletingPathExtension().lastPathComponent : cleanTitle
         
         // Generate Thumbnail
         var coverData: Data? = nil
@@ -267,7 +269,9 @@ class DocumentParser {
             let maxRepeats = max(2, chapters.count / 4)   // allow up to 25% repeats
             let deduped = chapters.filter { titleCounts[$0.title, default: 0] <= maxRepeats }
             
-            let title = findTagContent(in: opfContent, tag: "dc:title") ?? url.lastPathComponent
+            let rawTitle = findTagContent(in: opfContent, tag: "dc:title")
+            let cleanTitle = rawTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let title = cleanTitle.isEmpty ? url.deletingPathExtension().lastPathComponent : cleanTitle
             let author = findTagContent(in: opfContent, tag: "dc:creator")
             // Extract the new metadata
             let rawSummary = findTagContent(in: opfContent, tag: "dc:description")
@@ -317,7 +321,7 @@ class DocumentParser {
             let cleanedBlocks = smartClean(text)
             let cleanedText = cleanedBlocks.joined(separator: "\n\n")
             let autoTags = KeywordExtractor.extract(from: cleanedText)
-            return ParsedDocument(title: url.lastPathComponent, author: nil, text: cleanedText, paragraphCount: cleanedBlocks.count, coverImage: nil, initialParagraphIndex: 0, chapters: [], summary: nil, tags: autoTags.isEmpty ? nil : autoTags)
+            return ParsedDocument(title: url.deletingPathExtension().lastPathComponent, author: nil, text: cleanedText, paragraphCount: cleanedBlocks.count, coverImage: nil, initialParagraphIndex: 0, chapters: [], summary: nil, tags: autoTags.isEmpty ? nil : autoTags)
         } catch {
             return nil
         }

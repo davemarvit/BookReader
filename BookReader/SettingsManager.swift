@@ -1,3 +1,5 @@
+// SettingsManager.swift
+
 import Foundation
 import SwiftUI
 
