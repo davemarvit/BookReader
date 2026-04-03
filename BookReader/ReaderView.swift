@@ -460,8 +460,31 @@ struct ReaderTextView: View {
                 }
             }
             .task {
-                print("DIAGNOSTIC: ReaderTextView.task started")
-                return
+                print("BOOK PREP START")
+                let coverImage: UIImage? = {
+                    if let book = libraryManager.books.first(where: { $0.id == bookID }),
+                       let coverURL = libraryManager.getCoverURL(for: book),
+                       let data = try? Data(contentsOf: coverURL) {
+                        return UIImage(data: data)
+                    }
+                    return nil
+                }()
+                
+                let book = libraryManager.books.first(where: { $0.id == bookID })
+                let prepared = audioController.prepareBookContent(
+                    text: document.text,
+                    bookID: bookID,
+                    title: book?.title ?? document.title,
+                    cover: coverImage,
+                    initialIndex: book?.lastParagraphIndex ?? 0
+                )
+                
+                await MainActor.run {
+                    audioController.applyBookContent(prepared)
+                    if let index = book?.lastParagraphIndex, !audioController.isSessionActive {
+                        audioController.restorePosition(index: index)
+                    }
+                }
             }
         }
     }
