@@ -32,8 +32,8 @@ struct ReaderView: View {
     @State private var searchText = ""
     @State private var searchResults: [Int] = []
     @State private var currentSearchMatchIndex = 0
+    @State private var searchWorkItem: DispatchWorkItem?
     @FocusState private var isSearchFieldFocused: Bool
-    @State private var targetScrollIndex: Int?
     
     var body: some View {
         VStack(spacing: 0) {
@@ -54,11 +54,40 @@ struct ReaderView: View {
                         .focused($isSearchFieldFocused)
                         .padding(.leading)
                         .submitLabel(.search)
+                        .onSubmit {
+                            if !searchResults.isEmpty {
+                                navigateToSearchMatch(at: 0)
+                            }
+                        }
+                    
+                    if !searchText.isEmpty && searchResults.isEmpty {
+                        Text("Not found")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else if !searchResults.isEmpty {
+                        HStack(spacing: 8) {
+                            Text("\(currentSearchMatchIndex + 1) of \(searchResults.count)")
+                            
+                            Button(action: { previousMatch() }) {
+                                Image(systemName: "chevron.up")
+                            }
+                            
+                            Button(action: { nextMatch() }) {
+                                Image(systemName: "chevron.down")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    }
                     
                     Button("Cancel") {
                         withAnimation {
                             isSearching = false
                             searchText = ""
+                            searchWorkItem?.cancel()
+                            searchWorkItem = nil
+                            searchResults = []
+                            currentSearchMatchIndex = 0
                         }
                     }
                     .padding(.trailing)
@@ -102,9 +131,9 @@ struct ReaderView: View {
                 isUserScrolling: $isUserScrolling,
                 isInitialLoad: $isInitialLoad,
                 searchResults: searchResults,
-                searchText: searchText,
-                targetScrollIndex: $targetScrollIndex
+                searchText: searchText
             )
+            .id(bookID)
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
                     // Loading block purposefully relocated to top header overlay to prevent text occlusion
@@ -158,8 +187,16 @@ struct ReaderView: View {
         }
         .background(settings.currentTheme.backgroundColor.edgesIgnoringSafeArea(.all))
         .preferredColorScheme((settings.readerTheme == "dark" || settings.readerTheme == "lowContrastDark") ? .dark : (settings.readerTheme == "system" ? nil : .light))
-        .onChange(of: searchText) { _, newValue in
-            performSearch(query: newValue)
+        .onChange(of: searchText) { newValue in
+            searchWorkItem?.cancel()
+            
+            let workItem = DispatchWorkItem {
+                performSearch(query: newValue)
+            }
+            
+            searchWorkItem = workItem
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -212,20 +249,6 @@ struct ReaderView: View {
             
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 16) {
-                    if isSearching && !searchResults.isEmpty {
-                        Text("\(currentSearchMatchIndex + 1) of \(searchResults.count)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        
-                        Button(action: { previousMatch() }) {
-                            Image(systemName: "chevron.up")
-                        }
-                        
-                        Button(action: { nextMatch() }) {
-                            Image(systemName: "chevron.down")
-                        }
-                    }
-                    
                     // Search Button
                     Button(action: {
                         withAnimation {
@@ -319,7 +342,7 @@ struct ReaderView: View {
             }
         }
 
-        .onChange(of: audioController.activeGate) { _, newGate in
+        .onChange(of: audioController.activeGate) { newGate in
             if newGate != nil {
                 print("DIAGNOSTIC: ReaderView directly observed activeGate changing to NON-NIL!")
             }
@@ -367,9 +390,9 @@ struct ReaderView: View {
     func performSearch(query: String) {
         if query.isEmpty {
             searchResults = []
+            currentSearchMatchIndex = 0
             return
         }
-        
         let lowerQuery = query.lowercased()
         searchResults = audioController.paragraphs.enumerated().compactMap { index, text in
             if text.localizedCaseInsensitiveContains(lowerQuery) {
@@ -377,38 +400,27 @@ struct ReaderView: View {
             }
             return nil
         }
+        
         currentSearchMatchIndex = 0
-        if let first = searchResults.first {
-            targetScrollIndex = first
-            // Sync audio position
-            if !audioController.isSessionActive {
-                audioController.restorePosition(index: first)
-            }
-        }
+    }
+    
+    private func navigateToSearchMatch(at arrayIndex: Int) {
+        guard arrayIndex >= 0 && arrayIndex < searchResults.count else { return }
+        currentSearchMatchIndex = arrayIndex
+        let paragraphIndex = searchResults[arrayIndex]
+        audioController.setManualPlaybackPosition(index: paragraphIndex)
     }
     
     func nextMatch() {
-        if searchResults.isEmpty { return }
-        currentSearchMatchIndex = (currentSearchMatchIndex + 1) % searchResults.count
-        let newIndex = searchResults[currentSearchMatchIndex]
-        targetScrollIndex = newIndex
-        
-        // Sync audio position
-        if !audioController.isSessionActive {
-            audioController.restorePosition(index: newIndex)
-        }
+        guard !searchResults.isEmpty else { return }
+        let newArrayIndex = (currentSearchMatchIndex + 1) % searchResults.count
+        navigateToSearchMatch(at: newArrayIndex)
     }
     
     func previousMatch() {
-        if searchResults.isEmpty { return }
-        currentSearchMatchIndex = (currentSearchMatchIndex - 1 + searchResults.count) % searchResults.count
-        let newIndex = searchResults[currentSearchMatchIndex]
-        targetScrollIndex = newIndex
-        
-        // Sync audio position
-        if !audioController.isSessionActive {
-            audioController.restorePosition(index: newIndex)
-        }
+        guard !searchResults.isEmpty else { return }
+        let newArrayIndex = (currentSearchMatchIndex - 1 + searchResults.count) % searchResults.count
+        navigateToSearchMatch(at: newArrayIndex)
     }
 }
 
@@ -426,13 +438,14 @@ struct ReaderTextView: View {
     // Search Props
     let searchResults: [Int]
     let searchText: String
-    @Binding var targetScrollIndex: Int?
+    
+    @State private var didInitialViewportAlign = false
     
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    // Warning: We are keeping the Array(.enumerated()) conversion here 
+                    // Warning: We are keeping the Array(.enumerated()) conversion here
                     // to test if it's the specific cause of the freeze.
                     ForEach(Array(audioController.paragraphs.enumerated()), id: \.offset) { index, paragraph in
                         ParagraphRow(
@@ -452,7 +465,23 @@ struct ReaderTextView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 24)
             }
-            .onChange(of: audioController.currentParagraphIndex) { _, newIndex in
+            .onAppear {
+                guard !didInitialViewportAlign else { return }
+                guard audioController.currentBookID == bookID else { return }
+                guard !audioController.paragraphs.isEmpty else { return }
+                
+                didInitialViewportAlign = true
+                
+                let currentIndex = audioController.currentParagraphIndex
+                libraryManager.updateProgress(for: bookID, index: currentIndex)
+                
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        proxy.scrollTo(currentIndex, anchor: .center)
+                    }
+                }
+            }
+            .onChange(of: audioController.currentParagraphIndex) { newIndex in
                 guard audioController.currentBookID == bookID else { return }
                 libraryManager.updateProgress(for: bookID, index: newIndex)
                 withAnimation(.easeInOut(duration: 0.25)) {
@@ -461,26 +490,34 @@ struct ReaderTextView: View {
             }
             .task {
                 print("BOOK PREP START")
-                let coverImage: UIImage? = {
-                    if let book = libraryManager.books.first(where: { $0.id == bookID }),
-                       let coverURL = libraryManager.getCoverURL(for: book),
-                       let data = try? Data(contentsOf: coverURL) {
-                        return UIImage(data: data)
-                    }
-                    return nil
-                }()
-                
                 let book = libraryManager.books.first(where: { $0.id == bookID })
-                let prepared = audioController.prepareBookContent(
-                    text: document.text,
-                    bookID: bookID,
-                    title: book?.title ?? document.title,
-                    cover: coverImage,
-                    initialIndex: book?.lastParagraphIndex ?? 0
-                )
+                
+                if audioController.currentBookID == bookID && !audioController.paragraphs.isEmpty {
+                    print("SKIPPING PREP - ALREADY LOADED")
+                } else {
+                    let coverImage: UIImage? = {
+                        if let book = book,
+                           let coverURL = libraryManager.getCoverURL(for: book),
+                           let data = try? Data(contentsOf: coverURL) {
+                            return UIImage(data: data)
+                        }
+                        return nil
+                    }()
+                    
+                    let prepared = audioController.prepareBookContent(
+                        text: document.text,
+                        bookID: bookID,
+                        title: book?.title ?? document.title,
+                        cover: coverImage,
+                        initialIndex: book?.lastParagraphIndex ?? 0
+                    )
+                    
+                    await MainActor.run {
+                        audioController.applyBookContent(prepared)
+                    }
+                }
                 
                 await MainActor.run {
-                    audioController.applyBookContent(prepared)
                     if let index = book?.lastParagraphIndex, !audioController.isSessionActive {
                         audioController.restorePosition(index: index)
                     }
@@ -740,3 +777,4 @@ struct AnimatedEllipsisView: View {
             }
     }
 }
+
