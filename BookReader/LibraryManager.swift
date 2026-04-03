@@ -177,9 +177,11 @@ class LibraryManager: ObservableObject {
     
     func updateProgress(for bookID: UUID, index: Int) {
         if let idx = books.firstIndex(where: { $0.id == bookID }) {
-            books[idx].lastParagraphIndex = index
-            books[idx].lastReadDate = Date()
-            saveLibrary()
+            if books[idx].lastParagraphIndex != index {
+                books[idx].lastParagraphIndex = index
+                books[idx].lastReadDate = Date()
+                saveLibrary()
+            }
         }
     }
     

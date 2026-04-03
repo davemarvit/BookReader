@@ -33,6 +33,7 @@ final class PlaybackGateController: ObservableObject {
             paragraphIndex: paragraphIndex,
             requestedMode: requestedMode
         )
+        print("DIAGNOSTIC: activeGate/pendingGate becoming NON-NIL assigned via requestPlaybackDecision. Source: \(source), Mode: \(requestedMode)")
         self.pendingGate = newGate
         
         return await withCheckedContinuation { cont in
@@ -47,6 +48,7 @@ final class PlaybackGateController: ObservableObject {
             self.continuation = nil
             activeContinuation.resume(returning: choice)
         }
+        print("DIAGNOSTIC: activeGate/pendingGate becoming NIL assigned via resolvePendingGate. Resolution choice: \(choice)")
         self.pendingGate = nil
     }
 

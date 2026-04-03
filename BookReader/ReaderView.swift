@@ -189,7 +189,13 @@ struct ReaderView: View {
             }
             
             ToolbarItem(placement: .principal) {
-                Button(action: { showingVoiceModeSheet = true }) {
+                Button(action: {
+                    print("--- BANNER TAPPED ---")
+                    print("Preferred Engine: \(settings.preferredEngine)")
+                    print("Entitlement State: \(audioController.entitlementManager.premiumEntitlement)")
+                    print("Active Voice Mode: \(audioController.voiceModeController.activeMode)")
+                    // showingVoiceModeSheet = true
+                }) {
                     Text(voiceModeLabel)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
@@ -312,50 +318,11 @@ struct ReaderView: View {
                 .presentationDetents([.medium])
             }
         }
-        .sheet(isPresented: $showingVoiceModeSheet) {
-            NavigationView {
-                VStack(spacing: 20) {
-                    Text(voiceModeLabel)
-                        .font(.headline)
-                        .padding(.top)
 
-                    if audioController.playbackState.availability == .temporarilyUnavailable {
-                        Text("We’re having trouble connecting to the server. As soon as the connection is restored, Enhanced Audio will resume.")
-                            .font(.callout)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal)
-                    }
-
-                    if audioController.voiceModeController.activeMode == .premium && settings.hasValidGoogleKey {
-                        Button("Switch to Basic Audio") {
-                            settings.preferredEngine = "apple"
-                            audioController.handleManualVoiceSwitch(to: .standard)
-                            showingVoiceModeSheet = false
-                        }
-                        .buttonStyle(.bordered)
-                    } else if settings.hasValidGoogleKey {
-                        Button("Switch to Enhanced Audio") {
-                            settings.preferredEngine = "google"
-                            audioController.handleManualVoiceSwitch(to: .premium)
-                            showingVoiceModeSheet = false
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(audioController.playbackState.availability == .limitReached)
-                    }
-                    
-                    Spacer()
-                }
-                .navigationTitle("Audio Mode")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { showingVoiceModeSheet = false }
-                    }
-                }
+        .onChange(of: audioController.activeGate) { _, newGate in
+            if newGate != nil {
+                print("DIAGNOSTIC: ReaderView directly observed activeGate changing to NON-NIL!")
             }
-            
-            .presentationDetents([.fraction(0.4), .medium])
         }
         .sheet(item: $audioController.activeGate) { gate in
             VStack(spacing: 24) {
@@ -462,10 +429,11 @@ struct ReaderTextView: View {
     @Binding var targetScrollIndex: Int?
     
     var body: some View {
-        let _ = print("READER BODY: totalParagraphs=\(audioController.totalParagraphs) paragraphs=\(audioController.paragraphs.count)")
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
+                    // Warning: We are keeping the Array(.enumerated()) conversion here 
+                    // to test if it's the specific cause of the freeze.
                     ForEach(Array(audioController.paragraphs.enumerated()), id: \.offset) { index, paragraph in
                         ParagraphRow(
                             text: paragraph,
@@ -484,18 +452,6 @@ struct ReaderTextView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 24)
             }
-            .onChange(of: targetScrollIndex) { _, index in
-                if let idx = index {
-                    withAnimation {
-                         proxy.scrollTo(idx, anchor: .center)
-                    }
-                }
-            }
-            .onChange(of: searchResults) { _, results in
-                if let first = results.first {
-                    withAnimation { proxy.scrollTo(first, anchor: .center) }
-                }
-            }
             .onChange(of: audioController.currentParagraphIndex) { _, newIndex in
                 guard audioController.currentBookID == bookID else { return }
                 libraryManager.updateProgress(for: bookID, index: newIndex)
@@ -504,43 +460,8 @@ struct ReaderTextView: View {
                 }
             }
             .task {
-                print("BOOK PREP START")
-                print("READER TEXT VIEW AC ID:", ObjectIdentifier(audioController))
-                
-                // 1. Heavy work OFF main thread
-                let coverImage: UIImage? = {
-                    if let book = libraryManager.books.first(where: { $0.id == bookID }),
-                       let coverURL = libraryManager.getCoverURL(for: book),
-                       let data = try? Data(contentsOf: coverURL) {
-                        return UIImage(data: data)
-                    }
-                    return nil
-                }()
-                
-                let book = libraryManager.books.first(where: { $0.id == bookID })
-                
-                // Pure statically parsed state decoupled from the AudioController class properties
-                let prepared = audioController.prepareBookContent(
-                    text: document.text,
-                    bookID: bookID,
-                    title: book?.title ?? document.title,
-                    cover: coverImage,
-                    initialIndex: book?.lastParagraphIndex ?? 0
-                )
-                print("BOOK PREP DONE:", prepared.paragraphs.count)
-                
-                // 2. UI mutation ON main thread
-                await MainActor.run {
-                    audioController.applyBookContent(prepared)
-                    
-                    if let index = book?.lastParagraphIndex, !audioController.isSessionActive {
-                        audioController.restorePosition(index: index)
-                    }
-                    print("BOOK APPLY DONE")
-                    
-                    // Immediately synchronize text view back down to the actively running playhead
-                    proxy.scrollTo(audioController.currentParagraphIndex, anchor: .center)
-                }
+                print("DIAGNOSTIC: ReaderTextView.task started")
+                return
             }
         }
     }
@@ -713,9 +634,16 @@ struct ParagraphRow: View {
     let isSearchResult: Bool
 
     var body: some View {
-        let _ = print("PARAGRAPH ROW: index=\(index) textCount=\(text.count)")
-        Text(text)
-            .padding(4)
+        let isActive = (index == currentIndex)
+        HStack(alignment: .top, spacing: 8) {
+            Rectangle()
+                .fill(isActive ? settings.currentTheme.textColor.opacity(0.6) : Color.clear)
+                .frame(width: 4)
+                .cornerRadius(2)
+            
+            Text(text)
+                .padding(4)
+        }
     }
 }
     

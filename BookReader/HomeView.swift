@@ -62,6 +62,11 @@ struct HomeView: View {
                         emptyStateContent
                     }
                 }
+                .navigationDestination(for: NavigationDestination.self) { destination in
+                     if case let .reader(doc, book) = destination {
+                         ReaderView(document: doc, bookID: book.id, libraryManager: libraryManager, onClose: { navigationPath = [] }, onOpenLibrary: { selectedTab = 1; navigationPath = [] })
+                     }
+                }
             } else {
                 // Legacy Target View
                 VStack {
@@ -431,25 +436,13 @@ struct HomeView: View {
         if audioController.currentBookID != book.id {
             // Load logic is now integrated, or we can prep it first
             if let doc = loadDocument(for: book) {
-                // 1. Immediately switch tab
-                self.selectedTab = 1
-                
-                // 2. Safely defer path presentation to the settled tab hierarchy
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    self.libraryPath = [.reader(doc, book)]
-                }
+                self.navigationPath.append(.reader(doc, book))
             }
         } else {
              // Already loaded? Re-parse logic might be needed if we don't persist 'doc'
              // Ideally we shouldn't re-parse if unnecessary.
              if let doc = loadDocument(for: book) {
-                 // 1. Immediately switch tab
-                 self.selectedTab = 1
-                 
-                 // 2. Safely defer path presentation
-                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                     self.libraryPath = [.reader(doc, book)]
-                 }
+                 self.navigationPath.append(.reader(doc, book))
              }
         }
     }

@@ -442,7 +442,9 @@ class AudioController: NSObject, ObservableObject {
 
     func restorePosition(index: Int) {
         guard index >= 0 && index < totalParagraphs else { return }
-        currentParagraphIndex = index
+        if currentParagraphIndex != index {
+            currentParagraphIndex = index
+        }
     }
 
     func skip(bySeconds seconds: Double) {
