@@ -163,28 +163,6 @@ struct ReaderView: View {
                 .animation(.easeInOut(duration: 0.2), value: audioController.isLoading)
             }
         } // End Main VStack
-        .overlay(alignment: .top) {
-            // Enhanced Overlay Top Status Indicator - Theme Adaptive High Contrast
-            if audioController.isLoading {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: settings.currentTheme.backgroundColor))
-                        .scaleEffect(0.7)
-                    Text("Preparing enhanced audio...")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(settings.currentTheme.backgroundColor)
-                }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 16)
-                .background(
-                    Capsule()
-                        .fill(settings.currentTheme.textColor.opacity(0.85))
-                        .shadow(color: Color.black.opacity(0.2), radius: 4, y: 2)
-                )
-                .padding(.top, 12)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
         .background(settings.currentTheme.backgroundColor.edgesIgnoringSafeArea(.all))
         .preferredColorScheme((settings.readerTheme == "dark" || settings.readerTheme == "lowContrastDark") ? .dark : (settings.readerTheme == "system" ? nil : .light))
         .onChange(of: searchText) { newValue in
@@ -439,7 +417,34 @@ struct ReaderTextView: View {
     let searchResults: [Int]
     let searchText: String
     
+    @State private var viewportHeight: CGFloat = 0
+    @State private var paragraphHeights: [Int: CGFloat] = [:]
+    @State private var currentSegmentIndex: Int? = nil
+    @State private var lastCenteredSegmentKey: String? = nil
+    @State private var accumulatedActiveTime: TimeInterval = 0
+    @State private var lastTickDate: Date? = nil
+    @State private var paragraphStartIndex: Int? = nil
+    @State private var activeBand: ClosedRange<CGFloat>? = nil
+    @State private var activeSegmentCount: Int = 1
+    @State private var pendingInitialIndex: Int? = nil
+    
+    private let debugReadAlongSegments = true
+    private let debugReadAlongTrace = true
+    
+    private var traceStateString: String {
+        let bID = bookID.uuidString.prefix(4)
+        let cbID = audioController.currentBookID?.uuidString.prefix(4) ?? "nil"
+        let cpIdx = audioController.currentParagraphIndex
+        let pIdx = libraryManager.books.first(where: { $0.id == bookID })?.lastParagraphIndex ?? -1
+        let align = didInitialViewportAlign
+        let pend = pendingInitialIndex ?? -1
+        return "b=\(bID) cb=\(cbID) cp=\(cpIdx) last=\(pIdx) align=\(align) pend=\(pend)"
+    }
+    
     @State private var didInitialViewportAlign = false
+    @State private var didInitialParagraphScroll = false
+    
+    let readAlongTimer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
     
     var body: some View {
         ScrollViewReader { proxy in
@@ -453,7 +458,9 @@ struct ReaderTextView: View {
                             index: index,
                             currentIndex: audioController.currentParagraphIndex,
                             searchText: searchText,
-                            isSearchResult: searchResults.contains(index)
+                            isSearchResult: searchResults.contains(index),
+                            activeBand: (index == audioController.currentParagraphIndex) ? activeBand : nil,
+                            segmentCount: (index == audioController.currentParagraphIndex) ? activeSegmentCount : 1
                         )
                         .id(index)
                         .onTapGesture {
@@ -465,27 +472,72 @@ struct ReaderTextView: View {
                 .padding(.top, 4)
                 .padding(.bottom, 24)
             }
-            .onAppear {
-                guard !didInitialViewportAlign else { return }
-                guard audioController.currentBookID == bookID else { return }
-                guard !audioController.paragraphs.isEmpty else { return }
-                
-                didInitialViewportAlign = true
-                
-                let currentIndex = audioController.currentParagraphIndex
-                libraryManager.updateProgress(for: bookID, index: currentIndex)
-                
-                DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        proxy.scrollTo(currentIndex, anchor: .center)
-                    }
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: ViewportHeightPreferenceKey.self, value: geo.size.height)
                 }
+            )
+            .onPreferenceChange(ViewportHeightPreferenceKey.self) { height in
+                viewportHeight = height
+                checkInitialReadiness(proxy: proxy)
+            }
+            .onPreferenceChange(ParagraphHeightPreferenceKey.self) { heights in
+                paragraphHeights.merge(heights) { _, new in new }
+                checkInitialReadiness(proxy: proxy)
+            }
+            .onReceive(readAlongTimer) { _ in
+                updateReadAlongState(proxy: proxy)
+            }
+            .onAppear {
+                if debugReadAlongTrace { print("[ReadAlongTrace] appear \(traceStateString)") }
+                resetReadAlongEntryState()
+                checkInitialReadiness(proxy: proxy)
+            }
+            .onDisappear {
+                if debugReadAlongTrace { print("[ReadAlongTrace] disappear \(traceStateString)") }
+                resetReadAlongEntryState(isExit: true)
             }
             .onChange(of: audioController.currentParagraphIndex) { newIndex in
+                if debugReadAlongTrace { print("[ReadAlongTrace] paragraph-change new=\(newIndex) \(traceStateString)") }
                 guard audioController.currentBookID == bookID else { return }
                 libraryManager.updateProgress(for: bookID, index: newIndex)
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    proxy.scrollTo(newIndex, anchor: .center)
+                
+                paragraphStartIndex = newIndex
+                accumulatedActiveTime = 0
+                lastTickDate = nil
+                currentSegmentIndex = nil
+                lastCenteredSegmentKey = nil
+                activeBand = nil
+                
+                let pHeight = paragraphHeights[newIndex] ?? 0
+                let segCount = computeSegmentCount(paragraphHeight: pHeight, viewportHeight: viewportHeight)
+                activeSegmentCount = segCount
+                
+                if debugReadAlongSegments && segCount > 1 {
+                    print("[ReadAlong] oversized p=\(newIndex) h=\(pHeight) vh=\(viewportHeight) segs=\(segCount)")
+                }
+                
+                if segCount <= 1 {
+                    let duration = animationDuration(forDistance: viewportHeight * 0.8)
+                    withAnimation(.easeInOut(duration: duration)) {
+                        proxy.scrollTo(newIndex, anchor: .center)
+                    }
+                } else {
+                    currentSegmentIndex = 0
+                    
+                    let paddingFraction = min(0.08, 0.5 / CGFloat(segCount))
+                    activeBand = computeActiveBand(segIndex: 0, segCount: segCount, paddingFraction: paddingFraction)
+                    
+                    let segKey = "\(newIndex)-0"
+                    lastCenteredSegmentKey = segKey
+                    
+                    let jumpDistance = pHeight / CGFloat(max(1, segCount))
+                    let duration = animationDuration(forDistance: jumpDistance)
+                    DispatchQueue.main.async {
+                        withAnimation(.easeInOut(duration: duration)) {
+                            proxy.scrollTo(segKey, anchor: .center)
+                        }
+                    }
                 }
             }
             .task {
@@ -513,14 +565,304 @@ struct ReaderTextView: View {
                     )
                     
                     await MainActor.run {
+                        if debugReadAlongTrace { print("[ReadAlongTrace] task-before-apply \(traceStateString)") }
                         audioController.applyBookContent(prepared)
+                        if debugReadAlongTrace { print("[ReadAlongTrace] task-after-apply \(traceStateString)") }
                     }
                 }
                 
                 await MainActor.run {
                     if let index = book?.lastParagraphIndex, !audioController.isSessionActive {
+                        if debugReadAlongTrace { print("[ReadAlongTrace] task-before-restore \(traceStateString)") }
                         audioController.restorePosition(index: index)
+                        if debugReadAlongTrace { print("[ReadAlongTrace] task-after-restore \(traceStateString)") }
                     }
+                }
+            }
+        }
+    }
+    
+    private func resetReadAlongEntryState(isExit: Bool = false) {
+        if debugReadAlongSegments {
+            print(isExit ? "[ReadAlong] exit-reset" : "[ReadAlong] entry-reset")
+        }
+        if debugReadAlongTrace {
+            print(isExit ? "[ReadAlongTrace] reset exit \(traceStateString)" : "[ReadAlongTrace] reset entry \(traceStateString)")
+        }
+        didInitialViewportAlign = false
+        didInitialParagraphScroll = false
+        pendingInitialIndex = nil
+        lastCenteredSegmentKey = nil
+        currentSegmentIndex = nil
+        activeBand = nil
+        paragraphStartIndex = nil
+        accumulatedActiveTime = 0
+        lastTickDate = nil
+    }
+    
+    private func checkInitialReadiness(proxy: ScrollViewProxy) {
+        if debugReadAlongTrace { print("[ReadAlongTrace] check-start \(traceStateString)") }
+        
+        guard !didInitialViewportAlign else { return }
+        guard audioController.currentBookID == bookID else { return }
+        guard !audioController.paragraphs.isEmpty else { return }
+        
+        let book = libraryManager.books.first(where: { $0.id == bookID })
+        let persistedIndex = book?.lastParagraphIndex
+        let currentIndex = audioController.currentParagraphIndex
+        
+        var targetIndex = persistedIndex ?? currentIndex
+        let maxIndex = audioController.paragraphs.count - 1
+        if maxIndex >= 0 {
+            targetIndex = max(0, min(maxIndex, targetIndex))
+        }
+        
+        if !didInitialParagraphScroll {
+            if debugReadAlongSegments { print("[ReadAlong] init-prealign p=\(targetIndex)") }
+            didInitialParagraphScroll = true
+            let duration = animationDuration(forDistance: viewportHeight * 0.8)
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: duration)) {
+                    proxy.scrollTo(targetIndex, anchor: .center)
+                }
+            }
+            return
+        }
+        
+        guard viewportHeight > 0 else {
+            if debugReadAlongSegments { print("[ReadAlong] init-wait p=\(targetIndex) (no viewport)") }
+            if debugReadAlongTrace { print("[ReadAlongTrace] check-return reason=no-viewport \(traceStateString)") }
+            return
+        }
+        
+        let pHeight = paragraphHeights[targetIndex] ?? 0
+        guard pHeight > 0 else {
+            if debugReadAlongSegments { print("[ReadAlong] init-wait p=\(targetIndex) (no height)") }
+            if debugReadAlongTrace { print("[ReadAlongTrace] check-return reason=no-height \(traceStateString)") }
+            return
+        }
+        
+        if pendingInitialIndex != targetIndex {
+            if debugReadAlongSegments { print("[ReadAlong] init-candidate p=\(targetIndex)") }
+            if debugReadAlongTrace { print("[ReadAlongTrace] check-return reason=await-stable-index \(traceStateString)") }
+            pendingInitialIndex = targetIndex
+            return
+        }
+        
+        if debugReadAlongSegments { print("[ReadAlong] init-stable p=\(targetIndex)") }
+        
+        didInitialViewportAlign = true
+        libraryManager.updateProgress(for: bookID, index: targetIndex)
+        
+        let segCount = computeSegmentCount(paragraphHeight: pHeight, viewportHeight: viewportHeight)
+        activeSegmentCount = segCount
+        
+        if debugReadAlongSegments {
+            print("[ReadAlong] init-stage2-ready p=\(targetIndex) segs=\(segCount)")
+        }
+        
+        if segCount <= 1 {
+            if debugReadAlongTrace { print("[ReadAlongTrace] init-align mode=paragraph target=\(targetIndex) \(traceStateString)") }
+            let duration = animationDuration(forDistance: viewportHeight * 0.8)
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: duration)) {
+                    proxy.scrollTo(targetIndex, anchor: .center)
+                }
+            }
+        } else {
+            paragraphStartIndex = targetIndex
+            accumulatedActiveTime = 0
+            lastTickDate = nil
+            currentSegmentIndex = 0
+            
+            let paddingFraction = min(0.08, 0.5 / CGFloat(segCount))
+            activeBand = computeActiveBand(segIndex: 0, segCount: segCount, paddingFraction: paddingFraction)
+            
+            let segKey = "\(targetIndex)-0"
+            lastCenteredSegmentKey = segKey
+            
+            if debugReadAlongSegments {
+                print("[ReadAlong] init-stage2-scroll p=\(targetIndex) s=0")
+            }
+            if debugReadAlongTrace { print("[ReadAlongTrace] init-align mode=segment0 target=\(segKey) \(traceStateString)") }
+            if debugReadAlongTrace { print("[ReadAlongTrace] init-scroll-target key=\(segKey) \(traceStateString)") }
+            
+            let jumpDistance = pHeight / CGFloat(max(1, segCount))
+            let duration = animationDuration(forDistance: jumpDistance)
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: duration)) {
+                    proxy.scrollTo(segKey, anchor: .top)
+                }
+            }
+        }
+    }
+    
+    private func computeActiveBand(segIndex: Int, segCount: Int, paddingFraction: CGFloat) -> ClosedRange<CGFloat> {
+        let exactStart = CGFloat(segIndex) / CGFloat(segCount)
+        let exactEnd = CGFloat(segIndex + 1) / CGFloat(segCount)
+        
+        if segCount <= 1 { return 0.0...1.0 }
+        
+        let topPaddingBase: CGFloat
+        let bottomPaddingBase: CGFloat
+        
+        if segIndex == 0 {
+            topPaddingBase = 0.0
+            bottomPaddingBase = paddingFraction * 1.15
+        } else if segIndex == segCount - 1 {
+            topPaddingBase = -min(paddingFraction * 0.2, 0.015)
+            bottomPaddingBase = 0.0
+        } else {
+            topPaddingBase = -min(paddingFraction * 0.2, 0.015)
+            bottomPaddingBase = paddingFraction * 0.9
+        }
+        
+        let segmentProgress = segCount > 1 ? CGFloat(segIndex) / CGFloat(segCount - 1) : 0
+        let topDriftMultiplier = 1.0 + 0.10 * segmentProgress
+        let bottomDriftMultiplier = 1.0 + 0.30 * segmentProgress
+        
+        var topPadding = topPaddingBase * topDriftMultiplier
+        var bottomPadding = bottomPaddingBase * bottomDriftMultiplier
+        
+        let topPaddingCapFraction: CGFloat = 0.035
+        let bottomPaddingCapFraction: CGFloat = 0.07
+        
+        topPadding = min(topPadding, topPaddingCapFraction)
+        bottomPadding = min(bottomPadding, bottomPaddingCapFraction)
+        
+        let start = min(exactEnd, max(0, exactStart - topPadding))
+        let end = min(1, exactEnd + bottomPadding)
+        
+        return start...end
+    }
+
+    private func animationDuration(forDistance distance: CGFloat) -> Double {
+        let vh = max(1, viewportHeight)
+        let normalized = min(1.0, abs(distance) / vh)
+        return 0.18 + 0.22 * Double(normalized)
+    }
+    
+    private func computeSegmentCount(paragraphHeight: CGFloat, viewportHeight: CGFloat) -> Int {
+        guard viewportHeight > 0 else { return 1 }
+        let threshold = 0.60 * viewportHeight
+        if paragraphHeight < threshold { return 1 }
+        let rawCount = ceil(paragraphHeight / threshold)
+        return max(2, Int(rawCount))
+    }
+    
+    private func updateReadAlongState(proxy: ScrollViewProxy) {
+        let isPlaying = audioController.isSessionActive && audioController.isPlaying
+        
+        guard isPlaying else {
+            lastTickDate = nil // reset tick date on pause to prevent accumulating background time natively
+            return
+        }
+        
+        let pIndex = audioController.currentParagraphIndex
+        if paragraphStartIndex != pIndex {
+            // Wait for onChange to run
+            return
+        }
+        
+        let now = Date()
+        if let lastTick = lastTickDate {
+            accumulatedActiveTime += now.timeIntervalSince(lastTick)
+        }
+        lastTickDate = now
+        
+        let pHeight = paragraphHeights[pIndex] ?? 0
+        let segCount = computeSegmentCount(paragraphHeight: pHeight, viewportHeight: viewportHeight)
+        
+        if activeSegmentCount != segCount {
+            activeSegmentCount = segCount
+        }
+        
+        if segCount <= 1 {
+            if activeBand != nil { activeBand = nil }
+            return
+        }
+        
+        let words = max(1, audioController.paragraphs.indices.contains(pIndex) ? audioController.paragraphs[pIndex].components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.count : 1)
+        let effectiveWPM = 160.0 * Double(audioController.playbackRate)
+        let estimatedDuration = (Double(words) / effectiveWPM) * 60.0
+        guard estimatedDuration > 0 else { return }
+        
+        let progress = CGFloat(max(0, min(1.0, accumulatedActiveTime / estimatedDuration)))
+        
+        let text = audioController.paragraphs.indices.contains(pIndex) ? audioController.paragraphs[pIndex] : ""
+        let charCount = max(1, text.count)
+        let charsPerChunk = Int(ceil(Double(charCount) / Double(segCount)))
+        
+        var weights: [Double] = []
+        var currentIndex = text.startIndex
+        for _ in 0..<segCount {
+            if currentIndex >= text.endIndex {
+                weights.append(1.0)
+                continue
+            }
+            let nextIndex = text.index(currentIndex, offsetBy: charsPerChunk, limitedBy: text.endIndex) ?? text.endIndex
+            let chunkText = text[currentIndex..<nextIndex]
+            
+            var weight = Double(chunkText.count)
+            for char in chunkText {
+                switch char {
+                case ",": weight += 2
+                case ":", ";": weight += 3
+                case ".", "?", "!": weight += 5
+                case "-", "(", ")": weight += 2
+                case "_": weight += 6
+                default: break
+                }
+            }
+            weights.append(max(1.0, weight))
+            currentIndex = nextIndex
+        }
+        
+        let totalWeight = weights.reduce(0, +)
+        var cumulative: [CGFloat] = [0.0]
+        var sum = 0.0
+        for w in weights {
+            sum += w
+            cumulative.append(CGFloat(sum / totalWeight))
+        }
+        cumulative[segCount] = 1.0
+        
+        var segIndex = segCount - 1
+        for i in 0..<segCount {
+            let start = cumulative[i]
+            let end = cumulative[i+1]
+            if progress >= start && progress < end {
+                segIndex = i
+                break
+            }
+        }
+        if progress >= 1.0 { segIndex = segCount - 1 }
+        
+        if debugReadAlongSegments && currentSegmentIndex != segIndex && currentSegmentIndex == 0 {
+            let wStrings = weights.map { String(format: "%.0f", $0) }.joined(separator: ",")
+            print("[ReadAlong] weights p=\(pIndex) segs=\(segCount) values=[\(wStrings)]")
+        }
+        
+        let paddingFraction = min(0.08, 0.5 / CGFloat(segCount))
+        activeBand = computeActiveBand(segIndex: segIndex, segCount: segCount, paddingFraction: paddingFraction)
+        
+        if currentSegmentIndex != segIndex {
+            if debugReadAlongSegments {
+                let old = currentSegmentIndex ?? -1
+                print("[ReadAlong] segment p=\(pIndex) \(old)->\(segIndex) progress=\(progress)")
+            }
+            currentSegmentIndex = segIndex
+            
+            let segKey = "\(pIndex)-\(segIndex)"
+            if lastCenteredSegmentKey != segKey {
+                if debugReadAlongSegments {
+                    print("[ReadAlong] recenter p=\(pIndex) s=\(segIndex)")
+                }
+                lastCenteredSegmentKey = segKey
+                let jumpDistance = pHeight / CGFloat(max(1, segCount))
+                let duration = animationDuration(forDistance: jumpDistance)
+                withAnimation(.easeInOut(duration: duration)) {
+                    proxy.scrollTo(segKey, anchor: .center)
                 }
             }
         }
@@ -638,7 +980,7 @@ struct ReaderControlsView: View {
                 Spacer()
                 
                 // Play/Pause (Centered)
-                StablePlayButton(isPlaying: audioController.isPlaying) {
+                StablePlayButton(isPlaying: audioController.isPlaying, isLoading: audioController.isLoading) {
                     if audioController.isPlaying {
                         audioController.pause()
                     } else {
@@ -692,17 +1034,51 @@ struct ParagraphRow: View {
     let currentIndex: Int
     let searchText: String
     let isSearchResult: Bool
+    var activeBand: ClosedRange<CGFloat>? = nil
+    var segmentCount: Int = 1
 
     var body: some View {
         let isActive = (index == currentIndex)
         HStack(alignment: .top, spacing: 8) {
-            Rectangle()
-                .fill(isActive ? settings.currentTheme.textColor.opacity(0.6) : Color.clear)
+            Color.clear
                 .frame(width: 4)
-                .cornerRadius(2)
+                .overlay(
+                    GeometryReader { geo in
+                        let fullHeight = geo.size.height
+                        ZStack(alignment: .top) {
+                            if isActive {
+                                if let band = activeBand {
+                                    Rectangle()
+                                        .fill(settings.currentTheme.textColor.opacity(0.6))
+                                        .frame(width: 4, height: max(0, (band.upperBound - band.lowerBound) * fullHeight))
+                                        .cornerRadius(2)
+                                        .offset(y: band.lowerBound * fullHeight)
+                                } else {
+                                    Rectangle()
+                                        .fill(settings.currentTheme.textColor.opacity(0.6))
+                                        .frame(width: 4, height: fullHeight)
+                                        .cornerRadius(2)
+                                }
+                            }
+                            
+                            VStack(spacing: 0) {
+                                ForEach(0..<segmentCount, id: \.self) { sIndex in
+                                    Color.clear
+                                        .id("\(index)-\(sIndex)")
+                                        .frame(height: fullHeight / CGFloat(max(1, segmentCount)))
+                                }
+                            }
+                        }
+                    }
+                )
             
             Text(text)
                 .padding(4)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: ParagraphHeightPreferenceKey.self, value: [index: geo.size.height])
+                    }
+                )
         }
     }
 }
@@ -729,32 +1105,54 @@ struct ViewOffsetKey: PreferenceKey {
     }
 }
 
+struct ViewportHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+struct ParagraphHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: [Int: CGFloat] = [:]
+    static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 // ZStack-based Button to prevent SF Symbol swapping flicker
 // MARK: - Equatable to prevent redundancy
 struct StablePlayButton: View, Equatable {
     let isPlaying: Bool
+    let isLoading: Bool
     let action: () -> Void
     
     static func == (lhs: StablePlayButton, rhs: StablePlayButton) -> Bool {
-        return lhs.isPlaying == rhs.isPlaying
+        return lhs.isPlaying == rhs.isPlaying && lhs.isLoading == rhs.isLoading
     }
     
     var body: some View {
         Button(action: action) {
             ZStack {
-                // Play Icon
-                Image(systemName: "play.circle.fill")
-                    .resizable()
-                    .frame(width: 60, height: 60)
-                    .foregroundColor(.accentColor)
-                    .opacity(isPlaying ? 0 : 1)
-                
-                // Pause Icon
-                Image(systemName: "pause.circle.fill")
-                    .resizable()
-                    .frame(width: 60, height: 60)
-                    .foregroundColor(.accentColor)
-                    .opacity(isPlaying ? 1 : 0)
+                if isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .accentColor))
+                        .scaleEffect(1.5)
+                        .frame(width: 60, height: 60)
+                } else {
+                    // Play Icon
+                    Image(systemName: "play.circle.fill")
+                        .resizable()
+                        .frame(width: 60, height: 60)
+                        .foregroundColor(.accentColor)
+                        .opacity(isPlaying ? 0 : 1)
+                    
+                    // Pause Icon
+                    Image(systemName: "pause.circle.fill")
+                        .resizable()
+                        .frame(width: 60, height: 60)
+                        .foregroundColor(.accentColor)
+                        .opacity(isPlaying ? 1 : 0)
+                }
             }
             // Use transaction to prevent parent animations from leaking in
             .transaction { transaction in
