@@ -96,7 +96,8 @@ class SettingsManager: ObservableObject {
     // MARK: - Playback Controller Helpers
     
     var preferredVoiceMode: VoiceMode {
-        return preferredEngine == "google" ? .premium : .standard
+        get { return preferredEngine == "google" ? .premium : .standard }
+        set { preferredEngine = newValue == .premium ? "google" : "apple" }
     }
     
     var currentPremiumVoiceID: String {

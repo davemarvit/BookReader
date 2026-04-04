@@ -325,6 +325,9 @@ class AudioController: NSObject, ObservableObject {
         }
 
         self.stopEverything()
+        
+        self.voiceModeController.markPremiumTemporarilyUnavailable(false)
+        print("[RECOVERY] temporary-unavailable cleared on reset (applyBookContent)")
 
         self.currentBookID = prepared.bookID
         self.bookTitle = prepared.title
@@ -367,9 +370,10 @@ class AudioController: NSObject, ObservableObject {
         // Ensure playback engine synchronizes to the single-source-of-truth resolved mode on cold start.
         // Solves the issue where VoiceModeController's object init blindly captures @AppStorage defaults too early.
         if !isPlaying {
-            let targetMode = resolvedPlaybackMode
+            let targetMode = settings.preferredVoiceMode
             if voiceModeController.activeMode != targetMode {
                 voiceModeController.requestModeSwitch(targetMode, intent: .userInitiated, isPlaying: false)
+                print("[RECOVERY] recovery-intent preserved: syncing active mode to true preferred \(targetMode) rather than resolved fallback")
             }
         }
         
@@ -492,6 +496,10 @@ class AudioController: NSObject, ObservableObject {
             appleTTSDebounceTimer?.invalidate()
             currentAppleUtterance = nil
             localSynthesizer.stopSpeaking(at: .immediate)
+            
+            self.voiceModeController.markPremiumTemporarilyUnavailable(false)
+            print("[RECOVERY] temporary-unavailable cleared on reset (setManualPlaybackPosition)")
+            
             activeTask?.cancel()
             errorMessage = nil
         }
@@ -510,6 +518,9 @@ class AudioController: NSObject, ObservableObject {
         appleTTSDebounceTimer?.invalidate()
         currentAppleUtterance = nil
         localSynthesizer.stopSpeaking(at: .immediate)
+        
+        self.voiceModeController.markPremiumTemporarilyUnavailable(false)
+        print("[RECOVERY] temporary-unavailable cleared on reset (jumpToParagraph)")
 
         currentParagraphIndex = index
         isLoading = false
@@ -529,7 +540,8 @@ class AudioController: NSObject, ObservableObject {
     func handleManualVoiceSwitch(to mode: VoiceMode) {
         let isCurrentlyPlaying = self.isPlaying
         self.errorMessage = nil
-
+        
+        settings.preferredVoiceMode = mode
         voiceModeController.requestModeSwitch(mode, intent: .userInitiated, isPlaying: isCurrentlyPlaying)
 
         if isCurrentlyPlaying {
@@ -583,6 +595,10 @@ class AudioController: NSObject, ObservableObject {
             voiceModeController.markPremiumTemporarilyUnavailable(unavailable)
             if unavailable {
                 startPremiumRecoveryProbe()
+                
+                if voiceModeController.isPremiumTemporarilyUnavailable {
+                    triggerImmediateRecoveryProbeIfNeeded()
+                }
             } else {
                 premiumRecoveryTimer?.invalidate()
                 premiumRecoveryTimer = nil
@@ -628,6 +644,7 @@ class AudioController: NSObject, ObservableObject {
     // MARK: - Apple TTS Implementation
 
     private func playLocal() {
+        triggerImmediateRecoveryProbeIfNeeded()
         if localSynthesizer.isPaused && currentAppleUtterance != nil {
             localSynthesizer.continueSpeaking()
             isPlaying = true
@@ -1099,7 +1116,10 @@ class AudioController: NSObject, ObservableObject {
     private func startPremiumRecoveryProbe() {
         guard premiumRecoveryTimer == nil else { return }
         consecutiveSuccessfulProbes = 0
-        premiumRecoveryTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] timer in
+        
+        triggerImmediateRecoveryProbeIfNeeded()
+        
+        premiumRecoveryTimer = Timer.scheduledTimer(withTimeInterval: 0.75, repeats: true) { [weak self] timer in
             guard let self = self else {
                 timer.invalidate()
                 return
@@ -1107,6 +1127,13 @@ class AudioController: NSObject, ObservableObject {
             Task { @MainActor in
                 await self.probePremiumRecovery()
             }
+        }
+    }
+
+    private func triggerImmediateRecoveryProbeIfNeeded() {
+        guard voiceModeController.isPremiumTemporarilyUnavailable else { return }
+        Task { @MainActor [weak self] in
+            await self?.probePremiumRecovery()
         }
     }
     
@@ -1119,6 +1146,8 @@ class AudioController: NSObject, ObservableObject {
             return
         }
         
+        print("[RECOVERY] recovery timer kept alive / restarted")
+        
         logControlState(event: "recovery_probe_runs")
         // Secondary Gate: Cooldown
         if let starvationTime = starvationStartTime, abs(Date().timeIntervalSince(starvationTime)) < 10.0 {
@@ -1126,10 +1155,31 @@ class AudioController: NSObject, ObservableObject {
             return
         }
         
+        let bookIDString = currentBookID?.uuidString ?? "temp"
+        let voiceID = SettingsManager.shared.selectedVoiceID
+        let tempDir = FileManager.default.temporaryDirectory
+        
         // Find next appropriate index to prefetch and probe
-        // We advance the lookahead probe index based on consecutive successes to build up the buffer
-        let probeOffset = consecutiveSuccessfulProbes + 1
-        let probeIndex = min(currentParagraphIndex + probeOffset, paragraphs.count > 0 ? paragraphs.count - 1 : 0)
+        // Scan forward to find the first paragraph that isn't cached
+        var probeIndex = -1
+        let startIndex = currentParagraphIndex + 1
+        
+        if startIndex < paragraphs.count {
+            for index in startIndex..<paragraphs.count {
+                let expectedFileURL = tempDir.appendingPathComponent("para_\(bookIDString)_\(index)_\(voiceID).mp3")
+                if !FileManager.default.fileExists(atPath: expectedFileURL.path) {
+                    probeIndex = index
+                    break
+                }
+            }
+        }
+        
+        // If all paragraphs ahead are already downloaded, we point at the end to trigger the buffer check
+        if probeIndex == -1 {
+            probeIndex = paragraphs.count > 0 ? paragraphs.count - 1 : 0
+        }
+        
+        print("[RECOVERY] recovery-probe start index: \(probeIndex)")
         
         do {
             let task = ensureAudioTask(for: probeIndex)
@@ -1141,11 +1191,8 @@ class AudioController: NSObject, ObservableObject {
             let rate = Double(playbackRate > 0 ? playbackRate : 1.0)
             var totalDuration = 0.0
 
-            let bookIDString = currentBookID?.uuidString ?? "temp"
-            let voiceID = SettingsManager.shared.selectedVoiceID
-            let tempDir = FileManager.default.temporaryDirectory
+            // Context variables already computed above for probe target resolution
 
-            let startIndex = currentParagraphIndex + 1
             if startIndex < paragraphs.count {
                 for index in startIndex..<paragraphs.count {
                     let expectedFileURL = tempDir.appendingPathComponent("para_\(bookIDString)_\(index)_\(voiceID).mp3")
@@ -1164,6 +1211,8 @@ class AudioController: NSObject, ObservableObject {
 
             let bufferedSeconds = totalDuration / rate
             let isAtEnd = probeIndex == (paragraphs.count > 0 ? paragraphs.count - 1 : 0)
+
+            print("[RECOVERY] recovery-buffer contiguous seconds: \(bufferedSeconds)")
 
             guard consecutiveSuccessfulProbes >= 2 && (bufferedSeconds >= 10.0 || isAtEnd) else {
                 logControlState(event: "recovery_gate_rejected", reason: "buffer_below_threshold", extra: ["bufferedSec": String(format: "%.1f", bufferedSeconds)])
@@ -1519,6 +1568,7 @@ extension AudioController: @preconcurrency AVSpeechSynthesizerDelegate {
                 } else {
                     currentParagraphIndex = next
                     speakLocalParagraph(index: next)
+                    triggerImmediateRecoveryProbeIfNeeded()
                 }
             } else {
                 isPlaying = false

@@ -209,7 +209,7 @@ struct ReaderView: View {
                     print("Preferred Engine: \(settings.preferredEngine)")
                     print("Entitlement State: \(audioController.entitlementManager.premiumEntitlement)")
                     print("Active Voice Mode: \(audioController.voiceModeController.activeMode)")
-                    // showingVoiceModeSheet = true
+                    showingVoiceModeSheet = true
                 }) {
                     Text(voiceModeLabel)
                         .font(.subheadline.weight(.semibold))
@@ -355,10 +355,61 @@ struct ReaderView: View {
             .padding(32)
             .interactiveDismissDisabled()
         }
+        .sheet(isPresented: $showingVoiceModeSheet) {
+            VoiceModeSheetView(isPresented: $showingVoiceModeSheet, state: bannerState)
+                .environmentObject(audioController)
+        }
     } // End Body
     
+    // MARK: - Banner Derived State
+    enum ReaderBannerState {
+        case basicNotSubscribed
+        case basicEnhancedAvailable
+        case basicTemporarilyUnavailable
+        case basicEnhancedExhausted
+        case enhanced
+    }
+    
+    var bannerState: ReaderBannerState {
+        let entitlement = audioController.entitlementManager.premiumEntitlement
+        let resolved = audioController.resolvedPlaybackMode
+        let availability = audioController.playbackState.availability
+        let requested = audioController.voiceModeController.requestedMode
+
+        // Enhanced active
+        if resolved == .premium {
+            return .enhanced
+        }
+
+        // Temporarily unavailable
+        if availability == .temporarilyUnavailable {
+            return .basicTemporarilyUnavailable
+        }
+
+        // Quota exhausted
+        if availability == .limitReached {
+            return .basicEnhancedExhausted
+        }
+
+        let hasPremiumAccess = entitlement != .standardOnly
+
+        // User has entitlement (Enhanced available) but is currently in Basic
+        if hasPremiumAccess {
+            return .basicEnhancedAvailable
+        }
+
+        // Default: not subscribed
+        return .basicNotSubscribed
+    }
+    
     var voiceModeLabel: String {
-        return audioController.playbackState.bannerText
+        switch bannerState {
+        case .basicNotSubscribed: return "Basic Audio"
+        case .basicEnhancedAvailable: return "Basic · Enhanced Available"
+        case .basicTemporarilyUnavailable: return "Basic · Enhanced Temporarily Unavailable"
+        case .basicEnhancedExhausted: return "Basic · Enhanced Audio Exhausted"
+        case .enhanced: return "Enhanced Audio"
+        }
     }
     
     func getParagraph(at index: Int) -> String {
@@ -1176,3 +1227,123 @@ struct AnimatedEllipsisView: View {
     }
 }
 
+// MARK: - Voice Mode Sheet Content
+struct VoiceModeSheetView: View {
+    @EnvironmentObject var audioController: AudioController
+    @Binding var isPresented: Bool
+    let state: ReaderView.ReaderBannerState
+    
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                // Header icon
+                Image(systemName: "waveform")
+                    .font(.system(size: 48))
+                    .foregroundColor(.accentColor)
+                    .padding(.top, 20)
+                
+                Text(title)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .multilineTextAlignment(.center)
+                
+                Text(message)
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal)
+                
+                Spacer()
+                
+                VStack(spacing: 12) {
+                    buttons
+                }
+                .padding(.bottom, 30)
+                .padding(.horizontal)
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") { isPresented = false }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+    
+    var title: String {
+        switch state {
+        case .basicNotSubscribed: return "Basic Audio"
+        case .basicEnhancedAvailable: return "Enhanced Audio Available"
+        case .basicTemporarilyUnavailable: return "Enhanced Temporarily Unavailable"
+        case .basicEnhancedExhausted: return "Enhanced Audio Exhausted"
+        case .enhanced: return "Enhanced Audio"
+        }
+    }
+    
+    var message: String {
+        switch state {
+        case .basicNotSubscribed:
+            return "You are listening in Basic Audio. Enhanced Audio requires a subscription."
+        case .basicEnhancedAvailable:
+            return "Enhanced Audio is included for your account. You are currently using Basic Audio. You can stay in Basic to conserve Enhanced time or switch back now."
+        case .basicTemporarilyUnavailable:
+            return "Enhanced Audio is included for your account. It is temporarily unavailable right now. Playback has fallen back to Basic so reading can continue."
+        case .basicEnhancedExhausted:
+            // TODO: If the codebase already has access to the monthly reset / subscription anniversary date, show it.
+            return "Your current Enhanced Audio time has been used up for this billing period. You can continue in Basic Audio for now.\n\nNew Enhanced Audio time will be added on your monthly renewal date."
+        case .enhanced:
+            return "You are currently listening in Enhanced Audio."
+        }
+    }
+    
+    @ViewBuilder
+    var buttons: some View {
+        switch state {
+        case .basicNotSubscribed:
+            Button("Keep Using Basic Audio") { isPresented = false }
+                .buttonStyle(.bordered)
+            Button("Upgrade") { 
+                // TODO: Wire to billing flow
+                isPresented = false 
+            }
+            .buttonStyle(.borderedProminent)
+            
+        case .basicEnhancedAvailable:
+            Button("Switch to Enhanced Audio") {
+                audioController.handleManualVoiceSwitch(to: .premium)
+                isPresented = false
+            }
+            .buttonStyle(.borderedProminent)
+            Button("Keep Using Basic Audio") { isPresented = false }
+                .buttonStyle(.bordered)
+            
+        case .basicTemporarilyUnavailable:
+            Button("Try Enhanced Again") {
+                audioController.handleManualVoiceSwitch(to: .premium)
+                isPresented = false
+            }
+            .buttonStyle(.borderedProminent)
+            Button("Keep Using Basic Audio") { isPresented = false }
+                .buttonStyle(.bordered)
+            
+        case .basicEnhancedExhausted:
+            Button("Keep Using Basic Audio") { isPresented = false }
+                .buttonStyle(.bordered)
+            // TODO: If account type is Reader and upgrade info is available, offer Upgrade
+            Button("Upgrade (Coming Soon)") {
+                isPresented = false
+            }
+            .buttonStyle(.borderedProminent)
+            
+        case .enhanced:
+            Button("Keep Using Enhanced Audio") { isPresented = false }
+                .buttonStyle(.borderedProminent)
+            Button("Switch to Basic Audio") {
+                audioController.handleManualVoiceSwitch(to: .standard)
+                isPresented = false
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+}
