@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 
 struct SettingsView: View {
+    @EnvironmentObject var audioController: AudioController
     @ObservedObject var settings = SettingsManager.shared
     @ObservedObject var stats = StatsManager.shared
     @State private var showingResetConfirmation = false
@@ -134,6 +135,18 @@ struct SettingsView: View {
                     )
                 }
                 .padding(.vertical, 8)
+            }
+            
+            Section(header: Text("Debug Plan Override")) {
+                Picker("Plan", selection: Binding(
+                    get: { audioController.entitlementManager.currentPlan },
+                    set: { audioController.entitlementManager.currentPlan = $0 }
+                )) {
+                    ForEach(Plan.allCases, id: \.self) { plan in
+                        Text(plan.displayName).tag(plan)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
             
             Section(footer: Text(apiKeyStatus)) {

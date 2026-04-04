@@ -48,3 +48,48 @@ struct PendingPlaybackGate: Identifiable, Equatable {
     let paragraphIndex: Int
     let requestedMode: VoiceMode
 }
+
+enum Plan: String, Codable, CaseIterable {
+    case free
+    case reader
+    case avidReader
+    
+    var displayName: String {
+        switch self {
+        case .free: return "Free"
+        case .reader: return "Reader"
+        case .avidReader: return "Avid Reader"
+        }
+    }
+}
+
+struct PlanCapabilities {
+    let maxPlaybackSpeed: Double
+    let maxBooks: Int?   // nil = unlimited
+    let enhancedAvailable: Bool
+}
+
+extension Plan {
+    var capabilities: PlanCapabilities {
+        switch self {
+        case .free:
+            return PlanCapabilities(
+                maxPlaybackSpeed: 1.5,
+                maxBooks: 10,
+                enhancedAvailable: true
+            )
+        case .reader:
+            return PlanCapabilities(
+                maxPlaybackSpeed: 4.0,
+                maxBooks: nil,
+                enhancedAvailable: true
+            )
+        case .avidReader:
+            return PlanCapabilities(
+                maxPlaybackSpeed: 4.0,
+                maxBooks: nil,
+                enhancedAvailable: true
+            )
+        }
+    }
+}

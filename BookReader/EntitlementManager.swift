@@ -5,6 +5,10 @@ import Combine
 
 /// Runtime source of truth governing premium TTS playback permissions and explicit user gating.
 final class EntitlementManager: ObservableObject {
+    // TODO: Temporary client-side placeholder plan model.
+    // Backend authority and real StoreKit-backed tier mapping will come later.
+    @Published var currentPlan: Plan = .reader
+
     @Published var premiumEntitlement: PremiumEntitlementState = .requiresDecision
     @Published var lastResolvedSessionChoice: PlaybackGateChoice? = nil
     @Published var lastGateReason: String? = nil

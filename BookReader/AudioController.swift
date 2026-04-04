@@ -18,6 +18,10 @@ class AudioController: NSObject, ObservableObject {
 
     @Published var playbackRate: Float = UserDefaults.standard.float(forKey: "playbackRate") == 0 ? 1.0 : UserDefaults.standard.float(forKey: "playbackRate") {
         didSet {
+            let maxAllowed = Float(entitlementManager.currentPlan.capabilities.maxPlaybackSpeed)
+            if playbackRate > maxAllowed {
+                playbackRate = maxAllowed
+            }
             UserDefaults.standard.set(playbackRate, forKey: "playbackRate")
             updatePlaybackRate()
         }
@@ -225,6 +229,17 @@ class AudioController: NSObject, ObservableObject {
                     if bufferedSeconds < 2.0 {
                         print("WARNING: bufferedSeconds < 2.0 during playback (buffered: \(bufferedSeconds))")
                     }
+                }
+            }
+            .store(in: &cancellables)
+
+        entitlementManager.$currentPlan
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newPlan in
+                guard let self = self else { return }
+                let maxAllowed = Float(newPlan.capabilities.maxPlaybackSpeed)
+                if self.playbackRate > maxAllowed {
+                    self.playbackRate = maxAllowed
                 }
             }
             .store(in: &cancellables)
