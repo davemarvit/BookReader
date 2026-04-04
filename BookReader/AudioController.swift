@@ -16,11 +16,16 @@ class AudioController: NSObject, ObservableObject {
         }
     }
 
+    @Published var lastSpeedClampEvent: String? = nil
+
     @Published var playbackRate: Float = UserDefaults.standard.float(forKey: "playbackRate") == 0 ? 1.0 : UserDefaults.standard.float(forKey: "playbackRate") {
         didSet {
             let maxAllowed = Float(entitlementManager.currentPlan.capabilities.maxPlaybackSpeed)
             if playbackRate > maxAllowed {
                 playbackRate = maxAllowed
+                if entitlementManager.currentPlan == .free {
+                    lastSpeedClampEvent = "Max \(maxAllowed)x on Free plan"
+                }
             }
             UserDefaults.standard.set(playbackRate, forKey: "playbackRate")
             updatePlaybackRate()

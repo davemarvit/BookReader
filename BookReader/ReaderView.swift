@@ -970,6 +970,7 @@ struct ReaderControlsView: View {
     @Binding var isShowingTOC: Bool
     
     @State private var wasPlayingBeforeDrag = false
+    @State private var localClampMessage: String? = nil
     
     var body: some View {
         VStack(spacing: 20) {
@@ -1070,6 +1071,34 @@ struct ReaderControlsView: View {
                 }
             }
             .padding(.horizontal)
+            .overlay(
+                Group {
+                    if let msg = localClampMessage {
+                        Text(msg)
+                            .font(.caption.bold())
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.8).cornerRadius(8))
+                            .offset(y: -40)
+                            .transition(.opacity)
+                    }
+                }
+            )
+            .onChange(of: audioController.lastSpeedClampEvent) { newEvent in
+                guard let event = newEvent else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    localClampMessage = event
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    if localClampMessage == event {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            localClampMessage = nil
+                        }
+                        audioController.lastSpeedClampEvent = nil
+                    }
+                }
+            }
             
         }
         .padding(.vertical, 30)
