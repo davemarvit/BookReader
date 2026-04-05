@@ -240,6 +240,12 @@ class AudioController: NSObject, ObservableObject {
                         #endif
                     }
 
+                    if self.entitlementManager.isPremiumExhausted() {
+                        if self.voiceModeController.requestedMode == .premium {
+                            self.voiceModeController.requestModeSwitch(.standard, intent: .systemForcedFallback, isPlaying: self.isPlaying)
+                        }
+                    }
+
                     var bufferedSeconds = 0.0
                     if self.highestEnqueuedIndex >= self.currentParagraphIndex {
                         let text = self.paragraphs[self.currentParagraphIndex...self.highestEnqueuedIndex].joined(separator: " ")
