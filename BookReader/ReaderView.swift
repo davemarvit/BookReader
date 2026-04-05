@@ -971,6 +971,8 @@ struct ReaderControlsView: View {
     
     @State private var wasPlayingBeforeDrag = false
     @State private var localClampMessage: String? = nil
+    @State private var localExhaustionMessage: String? = nil
+    @State private var hasShownExhaustionMessage = false
     
     var body: some View {
         VStack(spacing: 20) {
@@ -1072,7 +1074,7 @@ struct ReaderControlsView: View {
             }
             .padding(.horizontal)
             .overlay(
-                Group {
+                VStack(spacing: 8) {
                     if let msg = localClampMessage {
                         Text(msg)
                             .font(.caption.bold())
@@ -1080,10 +1082,19 @@ struct ReaderControlsView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
                             .background(Color.black.opacity(0.8).cornerRadius(8))
-                            .offset(y: -40)
+                            .transition(.opacity)
+                    }
+                    if let msg = localExhaustionMessage {
+                        Text(msg)
+                            .font(.caption.bold())
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.black.opacity(0.8).cornerRadius(8))
                             .transition(.opacity)
                     }
                 }
+                .offset(y: -40)
             )
             .onChange(of: audioController.lastSpeedClampEvent) { newEvent in
                 guard let event = newEvent else { return }
@@ -1099,7 +1110,21 @@ struct ReaderControlsView: View {
                     }
                 }
             }
-            
+            .onChange(of: audioController.premiumMinutesExhaustedEvent) { isExhausted in
+                if isExhausted && !hasShownExhaustionMessage {
+                    hasShownExhaustionMessage = true
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        localExhaustionMessage = "Enhanced audio used up for this month."
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                        if localExhaustionMessage != nil {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                localExhaustionMessage = nil
+                            }
+                        }
+                    }
+                }
+            }
         }
         .padding(.vertical, 30)
         .foregroundColor(settings.currentTheme.textColor)
