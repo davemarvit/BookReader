@@ -75,7 +75,7 @@ class AudioController: NSObject, ObservableObject {
         let availability: EnhancedAvailability
         if !settings.hasValidGoogleKey {
             availability = .notIncluded
-        } else if entitlementManager.premiumEntitlement == .standardOnly && entitlementManager.lastGateReason == "quota_exhausted" {
+        } else if entitlementManager.isPremiumExhausted() {
             availability = .limitReached
         } else if voiceModeController.isPremiumTemporarilyUnavailable {
             availability = .temporarilyUnavailable

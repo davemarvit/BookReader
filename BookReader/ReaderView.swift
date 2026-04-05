@@ -376,9 +376,9 @@ struct ReaderView: View {
         let availability = audioController.playbackState.availability
         let requested = audioController.voiceModeController.requestedMode
 
-        // Enhanced active
-        if resolved == .premium {
-            return .enhanced
+        // Quota exhausted
+        if availability == .limitReached {
+            return .basicEnhancedExhausted
         }
 
         // Temporarily unavailable
@@ -386,9 +386,9 @@ struct ReaderView: View {
             return .basicTemporarilyUnavailable
         }
 
-        // Quota exhausted
-        if availability == .limitReached {
-            return .basicEnhancedExhausted
+        // Enhanced active
+        if resolved == .premium {
+            return .enhanced
         }
 
         let hasPremiumAccess = entitlement != .standardOnly
