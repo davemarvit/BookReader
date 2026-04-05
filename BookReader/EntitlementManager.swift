@@ -13,6 +13,7 @@ final class EntitlementManager: ObservableObject {
     @Published var lastResolvedSessionChoice: PlaybackGateChoice? = nil
     @Published var lastGateReason: String? = nil
     @Published var showUpgradeBanner: Bool = false
+    @Published var monthlyPremiumMinutesUsed: Double = 0
 
     /// Determines if a gate interface must be shown before continuing playback in the requested mode.
     func requiresExplicitGate(for requestedMode: VoiceMode) -> Bool {
@@ -55,5 +56,14 @@ final class EntitlementManager: ObservableObject {
     /// Clears the active session choice without revoking the underlying entitlement capability.
     func resetSessionDecision() {
         lastResolvedSessionChoice = nil
+    }
+
+    func incrementPremiumUsage(seconds: Double) {
+        monthlyPremiumMinutesUsed += seconds / 60.0
+    }
+
+    func isPremiumExhausted() -> Bool {
+        guard let limit = currentPlan.capabilities.monthlyPremiumMinutes else { return false }
+        return monthlyPremiumMinutesUsed >= limit
     }
 }

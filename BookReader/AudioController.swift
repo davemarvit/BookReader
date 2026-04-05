@@ -42,6 +42,7 @@ class AudioController: NSObject, ObservableObject {
 
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
+    @Published var premiumMinutesExhaustedEvent: Bool = false
 
     @Published var isSessionActive: Bool = false
     @Published var diagnosticDetails: String = "Diagnostics: Initializing..."
@@ -226,6 +227,19 @@ class AudioController: NSObject, ObservableObject {
                 StatsManager.shared.logReadingTime(seconds: 1.0)
                 
                 if self.isPremiumActiveMode {
+                    self.entitlementManager.incrementPremiumUsage(seconds: 1.0)
+                    
+                    #if DEBUG
+                    print("monthlyPremiumMinutesUsed =", self.entitlementManager.monthlyPremiumMinutesUsed)
+                    #endif
+                    
+                    if self.entitlementManager.isPremiumExhausted() && !self.premiumMinutesExhaustedEvent {
+                        self.premiumMinutesExhaustedEvent = true
+                        #if DEBUG
+                        print("PREMIUM EXHAUSTED EVENT FIRED")
+                        #endif
+                    }
+
                     var bufferedSeconds = 0.0
                     if self.highestEnqueuedIndex >= self.currentParagraphIndex {
                         let text = self.paragraphs[self.currentParagraphIndex...self.highestEnqueuedIndex].joined(separator: " ")

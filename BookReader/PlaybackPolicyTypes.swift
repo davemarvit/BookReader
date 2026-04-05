@@ -67,6 +67,7 @@ struct PlanCapabilities {
     let maxPlaybackSpeed: Double
     let maxBooks: Int?   // nil = unlimited
     let enhancedAvailable: Bool
+    let monthlyPremiumMinutes: Double? // nil = unlimited
 }
 
 extension Plan {
@@ -76,19 +77,22 @@ extension Plan {
             return PlanCapabilities(
                 maxPlaybackSpeed: 1.5,
                 maxBooks: 10,
-                enhancedAvailable: true
+                enhancedAvailable: true,
+                monthlyPremiumMinutes: 0.1
             )
         case .reader:
             return PlanCapabilities(
                 maxPlaybackSpeed: 4.0,
                 maxBooks: nil,
-                enhancedAvailable: true
+                enhancedAvailable: true,
+                monthlyPremiumMinutes: 600
             )
         case .avidReader:
             return PlanCapabilities(
                 maxPlaybackSpeed: 4.0,
                 maxBooks: nil,
-                enhancedAvailable: true
+                enhancedAvailable: true,
+                monthlyPremiumMinutes: 1500
             )
         }
     }
