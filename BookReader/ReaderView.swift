@@ -23,6 +23,10 @@ struct ReaderView: View {
     // Prevent initial scroll layout from resetting position
     @State private var isInitialLoad = true
     
+    // Exhaustion Modal State
+    @State private var showExhaustionModal = false
+    @State private var hasPresentedExhaustionModal = false
+    
     @Environment(\.presentationMode) var presentationMode
     @State private var showingControls = true
     @State private var isShowingTOC = false
@@ -358,6 +362,54 @@ struct ReaderView: View {
         .sheet(isPresented: $showingVoiceModeSheet) {
             VoiceModeSheetView(isPresented: $showingVoiceModeSheet, state: bannerState)
                 .environmentObject(audioController)
+        }
+        .onChange(of: audioController.premiumMinutesExhaustedEvent) { isExhausted in
+            if isExhausted && !hasPresentedExhaustionModal {
+                hasPresentedExhaustionModal = true
+                showExhaustionModal = true
+            }
+        }
+        .overlay {
+            if showExhaustionModal {
+                ZStack {
+                    Color.black.opacity(0.35)
+                        .ignoresSafeArea()
+                    
+                    VStack(spacing: 24) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 64))
+                            .foregroundColor(.orange)
+                            .padding(.bottom, 8)
+                        Text("Enhanced Audio Used Up")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                        Text("You’ve used up your Enhanced Audio for this month. You can subscribe to keep listening with Enhanced Audio, or continue with Basic Audio.")
+                            .font(.body)
+                            .multilineTextAlignment(.center)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal)
+                        
+                        VStack(spacing: 12) {
+                            Button("Subscribe") {
+                                showExhaustionModal = false
+                            }
+                            .buttonStyle(.borderedProminent)
+                            
+                            Button("Continue with Basic") {
+                                showExhaustionModal = false
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(32)
+                    .background(settings.currentTheme.backgroundColor)
+                    .cornerRadius(16)
+                    .shadow(color: Color.black.opacity(0.2), radius: 20)
+                    .padding(.horizontal, 24)
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: showExhaustionModal)
+            }
         }
     } // End Body
     
