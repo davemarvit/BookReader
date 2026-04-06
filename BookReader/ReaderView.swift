@@ -8,7 +8,7 @@ struct ReaderView: View {
     let bookID: UUID
     @ObservedObject var libraryManager: LibraryManager
     @ObservedObject var settings = SettingsManager.shared
-    
+
     // Navigation Callbacks
     var onClose: (() -> Void)?
     var onOpenLibrary: (() -> Void)?
@@ -182,6 +182,7 @@ struct ReaderView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: workItem)
         }
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarRole(.editor)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 // Sleep Timer Menu
@@ -513,7 +514,7 @@ struct ReaderTextView: View {
     @EnvironmentObject var audioController: AudioController
     @ObservedObject var libraryManager: LibraryManager
     @ObservedObject var settings = SettingsManager.shared
-    
+
     let bookID: UUID
     let document: ParsedDocument
     let isDraggingSlider: Bool
@@ -979,7 +980,7 @@ struct ReaderTextView: View {
 struct UpgradeBannerView: View {
     @EnvironmentObject var audioController: AudioController
     @ObservedObject var settings = SettingsManager.shared
-    
+
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "sparkles")

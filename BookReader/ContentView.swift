@@ -11,18 +11,21 @@ struct ContentView: View {
     @ObservedObject var libraryManager: LibraryManager
     
     @State private var selectedTab = 0
+    @State private var lastTab: Int = 0
     @State private var homeNavigationPath: [NavigationDestination] = []
     @State private var libraryNavigationPath: [NavigationDestination] = []
     
     @AppStorage("hasSeenLibraryWelcome") private var hasSeenLibraryWelcome = false
-    
+
     // Intercept user tab bar taps specifically
     private var tabSelection: Binding<Int> {
         Binding(
             get: { self.selectedTab },
             set: { newValue in
                 let oldValue = self.selectedTab
-                print("ContentView tabSelection set: old=\(oldValue) new=\(newValue)")
+                if newValue == 2 && oldValue != 2 {
+                    self.lastTab = oldValue
+                }
                 
                 // If double-tapping the current tab, naturally pop to root
                 if newValue == oldValue {
@@ -49,10 +52,19 @@ struct ContentView: View {
     
     private func applyTabBarAppearance(for tab: Int) {
         guard AppConfig.shared.isMonetizationBeta else { return }
+        let isRoot: Bool
+        if tab == 0 {
+            isRoot = homeNavigationPath.isEmpty
+        } else if tab == 1 {
+            isRoot = libraryNavigationPath.isEmpty
+        } else {
+            isRoot = true
+        }
+        
         // Dispatched async so the UITabBarController is guaranteed to be in
         // the view hierarchy before we walk it.
         DispatchQueue.main.async {
-            TabBarAppearanceManager.apply(for: tab)
+            TabBarAppearanceManager.apply(for: tab, isRoot: isRoot)
         }
     }
     
@@ -66,13 +78,12 @@ struct ContentView: View {
             }
             .onChange(of: selectedTab) { newValue in
                 applyTabBarAppearance(for: newValue)
-                print("ContentView onChange(selectedTab): \(newValue) homePathCount=\(homeNavigationPath.count) libraryPathCount=\(libraryNavigationPath.count)")
             }
             .onChange(of: homeNavigationPath) { newValue in
-                print("ContentView onChange(homeNavigationPath): count=\(newValue.count)")
+                applyTabBarAppearance(for: selectedTab)
             }
             .onChange(of: libraryNavigationPath) { newValue in
-                print("ContentView onChange(libraryNavigationPath): count=\(newValue.count)")
+                applyTabBarAppearance(for: selectedTab)
             }
     }
     
@@ -90,7 +101,8 @@ struct ContentView: View {
                 libraryManager: libraryManager,
                 selectedTab: $selectedTab,
                 navigationPath: $homeNavigationPath,
-                libraryPath: $libraryNavigationPath
+                libraryPath: $libraryNavigationPath,
+                lastTab: $lastTab
             )
         }
         .tabItem {
@@ -104,7 +116,8 @@ struct ContentView: View {
             LibraryView(
                 libraryManager: libraryManager,
                 selectedTab: $selectedTab,
-                navigationPath: $libraryNavigationPath
+                navigationPath: $libraryNavigationPath,
+                lastTab: $lastTab
             )
         }
         .tabItem {
@@ -115,7 +128,7 @@ struct ContentView: View {
     
     private var settingsTab: some View {
         NavigationStack {
-            SettingsView()
+            SettingsView(selectedTab: $selectedTab, lastTab: $lastTab)
         }
         .tabItem {
             Label("Settings", systemImage: "gearshape.fill")

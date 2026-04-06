@@ -5,8 +5,10 @@ struct SettingsView: View {
     @EnvironmentObject var audioController: AudioController
     @ObservedObject var settings = SettingsManager.shared
     @ObservedObject var stats = StatsManager.shared
+    @Binding var selectedTab: Int
+    @Binding var lastTab: Int
     @State private var showingResetConfirmation = false
-    
+
     // Apple Voices (Computed to keep it dynamic)
     var appleVoices: [AVSpeechSynthesisVoice] {
         return AVSpeechSynthesisVoice.speechVoices().filter { $0.language.starts(with: "en") }
@@ -152,6 +154,7 @@ struct SettingsView: View {
             Section(footer: Text(apiKeyStatus)) {
                 // Info footer
             }
+
         }
         .confirmationDialog("Reset Stats", isPresented: $showingResetConfirmation, titleVisibility: .visible) {
             Button("Reset reading stats", role: .destructive) {
@@ -163,6 +166,13 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button(action: {
+                    selectedTab = lastTab
+                }) {
+                    Image(systemName: "chevron.left")
+                }
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 NavigationLink(destination: HelpView()) {
                     Text("Help")

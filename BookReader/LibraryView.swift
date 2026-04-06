@@ -9,9 +9,10 @@ struct LibraryView: View {
     
     @Binding var selectedTab: Int
     @Binding var navigationPath: [NavigationDestination]
+    @Binding var lastTab: Int
     
     @AppStorage("hasSeenLibraryWelcome") private var hasSeenLibraryWelcome = false
-    
+
     // Deletion State
     @State private var showingDeleteConfirmation = false
     @State private var bookToDelete: UUID?
@@ -163,6 +164,7 @@ struct LibraryView: View {
                     },
                     onOpenSettings: {
                         self.navigationPath.removeAll()
+                        self.lastTab = self.selectedTab
                         self.selectedTab = 2
                     }
                 )

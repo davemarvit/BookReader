@@ -41,11 +41,23 @@ enum TabBarAppearanceManager {
 
     /// Applies the correct appearance directly to the live UITabBar instance.
     /// Must be called on the main thread.
-    static func apply(for tab: Int) {
+    static func apply(for tab: Int, isRoot: Bool) {
         guard let tabBar = liveTabBar() else { return }
-        let appearance = tab == 0 ? immersive : `default`
+        
+        let useImmersive = (tab == 0 && isRoot)
+        let appearance = useImmersive ? immersive : `default`
         tabBar.standardAppearance = appearance
         tabBar.scrollEdgeAppearance = appearance
+        
+        // Force legacy tint constraints to prevent SwiftUI navigation pushes 
+        // from silently overriding UITabBarItemAppearance items via proxy limits
+        if useImmersive {
+            tabBar.tintColor = .white
+            tabBar.unselectedItemTintColor = UIColor.white.withAlphaComponent(0.6)
+        } else {
+            tabBar.tintColor = nil
+            tabBar.unselectedItemTintColor = nil
+        }
     }
 
     // MARK: — Private

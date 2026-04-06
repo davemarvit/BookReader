@@ -7,6 +7,7 @@ struct HomeView: View {
     @Binding var selectedTab: Int
     @Binding var navigationPath: [NavigationDestination]
     @Binding var libraryPath: [NavigationDestination]
+    @Binding var lastTab: Int
     
     var activeBook: BookMetadata? {
         if AppConfig.shared.isMonetizationBeta {
@@ -62,11 +63,7 @@ struct HomeView: View {
                         emptyStateContent
                     }
                 }
-                .navigationDestination(for: NavigationDestination.self) { destination in
-                     if case let .reader(doc, book) = destination {
-                         ReaderView(document: doc, bookID: book.id, libraryManager: libraryManager, onClose: { navigationPath = [] }, onOpenLibrary: { selectedTab = 1; navigationPath = [] }, onOpenSettings: { selectedTab = 2; navigationPath = [] })
-                     }
-                }
+
             } else {
                 // Legacy Target View
                 VStack {
@@ -140,7 +137,7 @@ struct HomeView: View {
                     libraryManager: libraryManager,
                     onClose: { navigationPath = [] },
                     onOpenLibrary: { selectedTab = 1; navigationPath = [] },
-                    onOpenSettings: { selectedTab = 2; navigationPath = [] }
+                    onOpenSettings: { lastTab = selectedTab; selectedTab = 2; navigationPath = [] }
                 )
             }
         }
