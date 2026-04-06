@@ -85,7 +85,7 @@ extension Plan {
                 maxPlaybackSpeed: 4.0,
                 maxBooks: nil,
                 enhancedAvailable: true,
-                monthlyPremiumMinutes: 600
+                monthlyPremiumMinutes: 1
             )
         case .avidReader:
             return PlanCapabilities(
@@ -97,3 +97,4 @@ extension Plan {
         }
     }
 }
+

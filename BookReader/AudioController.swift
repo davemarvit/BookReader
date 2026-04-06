@@ -56,6 +56,16 @@ class AudioController: NSObject, ObservableObject {
     let voiceModeController = VoiceModeController()
     
     @Published var activeGate: PendingPlaybackGate?
+    
+    private var systemAudioPlayer: AVAudioPlayer?
+    private var hasPlayedExhaustionCue = false
+    
+    private var cueGender: String {
+        let id = settings.selectedVoiceID.lowercased()
+        // Broad heuristic: opposite-gender counter-programming
+        let isFemaleVoice = id.contains("-f") || id.contains("female") || id.contains("samantha")
+        return isFemaleVoice ? "male" : "female"
+    }
 
     private var premiumCapabilityAvailable: Bool { settings.hasValidGoogleKey }
     
@@ -223,6 +233,17 @@ class AudioController: NSObject, ObservableObject {
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.updateDiagnosticDetails()
+                
+                if !self.entitlementManager.isPremiumExhausted() {
+                    if self.hasPlayedExhaustionCue {
+                        #if DEBUG
+                        print("[CUE] Reset exhaustion latch")
+                        #endif
+                    }
+                    self.hasPlayedExhaustionCue = false
+                    self.premiumMinutesExhaustedEvent = false
+                }
+                
                 guard self.isPlaying else { return }
                 StatsManager.shared.logReadingTime(seconds: 1.0)
                 
@@ -1033,6 +1054,27 @@ class AudioController: NSObject, ObservableObject {
             print("[TRANSITION_TRACE] AV boundary evaluate: idx=\(index) pending=true resolved=\(resolvedMode)")
             
             let clearFlag: Bool? = (resolvedMode == .premium) ? false : nil
+            
+            if entitlementManager.isPremiumExhausted() && resolvedMode == .standard && !hasPlayedExhaustionCue {
+                hasPlayedExhaustionCue = true
+                #if DEBUG
+                print("[CUE] Playing exhaustion cue")
+                #endif
+                Task { @MainActor in
+                    isTransitioningPlayback = true
+                    player.pause() // Halt main queue progress
+                    
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    await playSystemAudioCue("enhanced_exhaustion_intro_\(cueGender)")
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    await playSystemAudioCue("enhanced_exhaustion_basic_\(cueGender)")
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    
+                    transitionAndContinuePlayback(to: index, shouldPlay: isSessionActive, markTemporarilyUnavailable: clearFlag)
+                }
+                return
+            }
+
             transitionAndContinuePlayback(to: index, shouldPlay: isSessionActive, markTemporarilyUnavailable: clearFlag)
             return
         }
@@ -1581,6 +1623,42 @@ class AudioController: NSObject, ObservableObject {
         sleepTimer = nil
         sleepTimerActive = false
         sleepTimerRemaining = 0
+    }
+
+    private func playExhaustionSequenceAndContinue(to activeIndex: Int, clearFlag: Bool?) async {
+        isTransitioningPlayback = true
+        player.pause() // Halt main queue progress
+        
+        // Wait brief pause
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        
+        await playSystemAudioCue("enhanced_exhaustion_intro_\(cueGender)")
+        
+        try? await Task.sleep(nanoseconds: 600_000_000)
+        
+        await playSystemAudioCue("enhanced_exhaustion_basic_\(cueGender)")
+        
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        
+        transitionAndContinuePlayback(to: activeIndex, shouldPlay: isSessionActive, markTemporarilyUnavailable: clearFlag)
+    }
+
+    private func playSystemAudioCue(_ name: String) async {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3") else {
+            #if DEBUG
+            print("WARNING: Missing local audio cue \(name).mp3")
+            #endif
+            return
+        }
+        do {
+            let p = try AVAudioPlayer(contentsOf: url)
+            self.systemAudioPlayer = p
+            p.play()
+            let duration = p.duration > 0 ? p.duration : 1.0
+            try await Task.sleep(nanoseconds: UInt64((duration + 0.1) * 1_000_000_000))
+        } catch {
+            print("WARNING: Failed to play local audio cue \(name)")
+        }
     }
 }
 

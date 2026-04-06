@@ -7,6 +7,7 @@ struct LibraryView: View {
     @EnvironmentObject var audioController: AudioController
     @State private var isImporterPresented = false
     
+    @Binding var selectedTab: Int
     @Binding var navigationPath: [NavigationDestination]
     
     @AppStorage("hasSeenLibraryWelcome") private var hasSeenLibraryWelcome = false
@@ -159,6 +160,10 @@ struct LibraryView: View {
                     },
                     onOpenLibrary: {
                         self.navigationPath.removeAll()
+                    },
+                    onOpenSettings: {
+                        self.navigationPath.removeAll()
+                        self.selectedTab = 2
                     }
                 )
             } else if case let .metadata(book) = destination {

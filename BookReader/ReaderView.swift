@@ -12,6 +12,7 @@ struct ReaderView: View {
     // Navigation Callbacks
     var onClose: (() -> Void)?
     var onOpenLibrary: (() -> Void)?
+    var onOpenSettings: (() -> Void)?
     
     // Dragging state
     @State private var isDraggingSlider = false
@@ -367,6 +368,8 @@ struct ReaderView: View {
             if isExhausted && !hasPresentedExhaustionModal {
                 hasPresentedExhaustionModal = true
                 showExhaustionModal = true
+            } else if !isExhausted {
+                hasPresentedExhaustionModal = false
             }
         }
         .overlay {
@@ -392,6 +395,7 @@ struct ReaderView: View {
                         VStack(spacing: 12) {
                             Button("Subscribe") {
                                 showExhaustionModal = false
+                                onOpenSettings?()
                             }
                             .buttonStyle(.borderedProminent)
                             

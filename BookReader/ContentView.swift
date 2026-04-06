@@ -103,6 +103,7 @@ struct ContentView: View {
         NavigationStack(path: $libraryNavigationPath) {
             LibraryView(
                 libraryManager: libraryManager,
+                selectedTab: $selectedTab,
                 navigationPath: $libraryNavigationPath
             )
         }

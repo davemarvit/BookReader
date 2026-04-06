@@ -64,7 +64,7 @@ struct HomeView: View {
                 }
                 .navigationDestination(for: NavigationDestination.self) { destination in
                      if case let .reader(doc, book) = destination {
-                         ReaderView(document: doc, bookID: book.id, libraryManager: libraryManager, onClose: { navigationPath = [] }, onOpenLibrary: { selectedTab = 1; navigationPath = [] })
+                         ReaderView(document: doc, bookID: book.id, libraryManager: libraryManager, onClose: { navigationPath = [] }, onOpenLibrary: { selectedTab = 1; navigationPath = [] }, onOpenSettings: { selectedTab = 2; navigationPath = [] })
                      }
                 }
             } else {
@@ -139,7 +139,8 @@ struct HomeView: View {
                     bookID: book.id,
                     libraryManager: libraryManager,
                     onClose: { navigationPath = [] },
-                    onOpenLibrary: { selectedTab = 1; navigationPath = [] }
+                    onOpenLibrary: { selectedTab = 1; navigationPath = [] },
+                    onOpenSettings: { selectedTab = 2; navigationPath = [] }
                 )
             }
         }
