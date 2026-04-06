@@ -571,9 +571,19 @@ struct ReaderTextView: View {
                             segmentCount: (index == audioController.currentParagraphIndex) ? activeSegmentCount : 1
                         )
                         .id(index)
-                        .onTapGesture {
-                            audioController.setManualPlaybackPosition(index: index)
-                        }
+                        .gesture(
+                            TapGesture(count: 2)
+                                .onEnded {
+                                    audioController.setManualPlaybackPosition(index: index)
+                                    audioController.play()
+                                }
+                                .exclusively(before:
+                                    TapGesture(count: 1)
+                                        .onEnded {
+                                            audioController.setManualPlaybackPosition(index: index)
+                                        }
+                                )
+                        )
                     }
                 }
                 .padding(.horizontal)
