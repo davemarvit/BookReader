@@ -17,6 +17,17 @@ struct LibraryView: View {
     @State private var showingDeleteConfirmation = false
     @State private var bookToDelete: UUID?
     @State private var searchText = ""
+    @State private var showingStatusSheet = false
+    
+    var libraryLimitText: String {
+        let count = libraryManager.books.count
+        let plan = audioController.entitlementManager.currentPlan
+        if let limit = plan.capabilities.maxBooks {
+            return "\(count)/\(limit)"
+        } else {
+            return "\(count)"
+        }
+    }
     
     
     func getProgress(for book: BookMetadata) -> Double {
@@ -60,6 +71,27 @@ struct LibraryView: View {
     
     var body: some View {
         List {
+            HStack(alignment: .lastTextBaseline) {
+                Text("My Library")
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                Button(action: {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                        showingStatusSheet.toggle()
+                    }
+                }) {
+                    Text(libraryLimitText)
+                        .font(.headline)
+                        .foregroundColor(.blue)
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 16, leading: 16, bottom: 8, trailing: 16))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+            
             if AppConfig.shared.isMonetizationBeta && !hasSeenLibraryWelcome {
                 Section {
                     VStack(alignment: .leading, spacing: 4) {
@@ -105,7 +137,8 @@ struct LibraryView: View {
                 hideWelcomeHint()
             }
         })
-        .navigationTitle("My Library")
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search title, author, or tags")
         .confirmationDialog("Delete Book?", isPresented: $showingDeleteConfirmation, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
@@ -177,6 +210,42 @@ struct LibraryView: View {
                 // State automatically handles welcome banner
             }
         }
+        .overlay(
+            Group {
+                if showingStatusSheet {
+                    ZStack(alignment: .topTrailing) {
+                        Color.black.opacity(0.001)
+                            .ignoresSafeArea()
+                            .onTapGesture {
+                                withAnimation { showingStatusSheet = false }
+                            }
+                        
+                        LibraryStatusSheet(
+                            libraryManager: libraryManager,
+                            onOpenSettings: {
+                                showingStatusSheet = false
+                                DispatchQueue.main.async {
+                                    self.navigationPath.removeAll()
+                                    self.lastTab = self.selectedTab
+                                    self.selectedTab = 2
+                                }
+                            }
+                        )
+                        .environmentObject(audioController)
+                        .background(Color(UIColor.systemBackground))
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                        )
+                        .shadow(color: Color.black.opacity(0.2), radius: 15, y: 8)
+                        .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
+                        .padding(.top, 64)
+                        .padding(.trailing, 16)
+                    }
+                }
+            }
+        )
     }
     
     func hideWelcomeHint() {
@@ -333,3 +402,84 @@ struct PieSlice: Shape {
         return path
     }
 }
+
+struct LibraryStatusSheet: View {
+    @EnvironmentObject var audioController: AudioController
+    @ObservedObject var libraryManager: LibraryManager
+    @ObservedObject var stats = StatsManager.shared
+    
+    var onOpenSettings: (() -> Void)?
+
+    var body: some View {
+        let plan = audioController.entitlementManager.currentPlan
+        let count = libraryManager.books.count
+        
+        VStack(spacing: 16) {
+            VStack(spacing: 8) {
+                HStack {
+                    Text("Library Status").font(.headline)
+                    Spacer()
+                }
+                HStack {
+                    Text("Current Plan")
+                    Spacer()
+                    Text(plan.displayName).foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("Books")
+                    Spacer()
+                    if let limit = plan.capabilities.maxBooks {
+                        Text("\(count) of \(limit)").foregroundColor(.secondary)
+                    } else {
+                        Text("\(count)").foregroundColor(.secondary)
+                    }
+                }
+            }
+            
+            Divider()
+            
+            VStack(spacing: 8) {
+                HStack {
+                    Text("Reading Time").font(.headline)
+                    Spacer()
+                }
+                StatRow(label: "Today", value: stats.formatDuration(stats.timeToday))
+                StatRow(label: "This Week", value: stats.formatDuration(stats.timeThisWeek))
+                StatRow(label: "All Time", value: stats.formatDuration(stats.timeEver))
+            }
+            
+            if plan == .free {
+                Divider()
+                Button(action: {
+                    onOpenSettings?()
+                }) {
+                    (Text("With the Free plan, the library is limited to 10 books. ")
+                        .foregroundColor(.primary) +
+                    Text("Subscribe")
+                        .underline()
+                        .foregroundColor(.blue) +
+                    Text(" for an unlimited library.")
+                        .foregroundColor(.primary))
+                    .multilineTextAlignment(.leading)
+                    .font(.footnote)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+        }
+        .padding(20)
+        .frame(width: 300)
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func popoverAdaptation() -> some View {
+        if #available(iOS 16.4, *) {
+            self.presentationCompactAdaptation(.popover)
+        } else {
+            self
+        }
+    }
+}
+
+
