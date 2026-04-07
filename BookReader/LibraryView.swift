@@ -210,6 +210,12 @@ struct LibraryView: View {
                 // State automatically handles welcome banner
             }
         }
+        .onDisappear {
+            showingStatusSheet = false
+        }
+        .onChange(of: selectedTab) { _ in
+            showingStatusSheet = false
+        }
         .overlay(
             Group {
                 if showingStatusSheet {
@@ -236,9 +242,9 @@ struct LibraryView: View {
                         .cornerRadius(12)
                         .overlay(
                             RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                                .stroke(Color.primary.opacity(0.12), lineWidth: 1)
                         )
-                        .shadow(color: Color.black.opacity(0.2), radius: 15, y: 8)
+                        .shadow(color: Color.black.opacity(0.35), radius: 18, y: 10)
                         .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .topTrailing)))
                         .padding(.top, 64)
                         .padding(.trailing, 16)
