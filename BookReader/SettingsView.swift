@@ -4,10 +4,11 @@ import AVFoundation
 struct SettingsView: View {
     @EnvironmentObject var audioController: AudioController
     @ObservedObject var settings = SettingsManager.shared
-    @ObservedObject var stats = StatsManager.shared
     @Binding var selectedTab: Int
     @Binding var lastTab: Int
-    @State private var showingResetConfirmation = false
+
+    @State private var showingPlans = false
+    @State private var showingManage = false
 
     // Apple Voices (Computed to keep it dynamic)
     var appleVoices: [AVSpeechSynthesisVoice] {
@@ -32,26 +33,12 @@ struct SettingsView: View {
     
     var body: some View {
         Form {
-            Section(header: 
-                HStack {
-                    Text("Reading Stats")
-                    Spacer()
-                    Button(action: {
-                        showingResetConfirmation = true
-                    }) {
-                        Text("Reset")
-                            .foregroundColor(.red)
-                            .textCase(.none)
-                    }
-                }
-            ) {
-                StatRow(label: "Today", value: stats.formatDuration(stats.timeToday))
-                StatRow(label: "This Week", value: stats.formatDuration(stats.timeThisWeek))
-                StatRow(label: "This Month", value: stats.formatDuration(stats.timeThisMonth))
-                StatRow(label: "This Year", value: stats.formatDuration(stats.timeThisYear))
-                StatRow(label: "All Time", value: stats.formatDuration(stats.timeEver))
+
+            Section(header: Text("Account")) {
+                NavigationLink("Upgrade", destination: PlansView(), isActive: $showingPlans)
+                NavigationLink("Manage Account", destination: ManageSubscriptionView(), isActive: $showingManage)
             }
-            
+
             Section(header: Text("Voice Settings")) {
                 // Info Text
                 Text(apiKeyStatus)
@@ -156,14 +143,7 @@ struct SettingsView: View {
             }
 
         }
-        .confirmationDialog("Reset Stats", isPresented: $showingResetConfirmation, titleVisibility: .visible) {
-            Button("Reset reading stats", role: .destructive) {
-                stats.resetStats()
-            }
-            Button("Cancel", role: .cancel) { }
-        } message: {
-            Text("This will permanently clear all your historical reading times. This action cannot be undone.")
-        }
+
         .navigationTitle("Settings")
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -178,6 +158,19 @@ struct SettingsView: View {
                     Text("Help")
                 }
             }
+        }
+        .onChange(of: settings.activeRoute) { route in
+            if route == .plans {
+                showingPlans = true
+                settings.activeRoute = nil
+            } else if route == .manage {
+                showingManage = true
+                settings.activeRoute = nil
+            }
+        }
+        .onChange(of: selectedTab) { _ in
+            showingPlans = false
+            showingManage = false
         }
     }
     

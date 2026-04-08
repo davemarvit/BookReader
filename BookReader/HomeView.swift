@@ -129,6 +129,19 @@ struct HomeView: View {
                 )
             }
         }
+        .overlay {
+            if audioController.showExhaustionModal {
+                ExhaustionModalView(isPresented: $audioController.showExhaustionModal) {
+                    lastTab = selectedTab
+                    selectedTab = 2
+                    navigationPath = []
+                    libraryPath = []
+                    SettingsManager.shared.activeRoute = nil
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.2), value: audioController.showExhaustionModal)
+            }
+        }
         .navigationDestination(for: NavigationDestination.self) { destination in
             if case let .reader(doc, book) = destination {
                 ReaderView(

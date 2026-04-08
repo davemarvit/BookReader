@@ -18,6 +18,7 @@ struct LibraryView: View {
     @State private var bookToDelete: UUID?
     @State private var searchText = ""
     @State private var showingStatusSheet = false
+    @State private var showingLimitAlert = false
     
     var libraryLimitText: String {
         let count = libraryManager.books.count
@@ -234,6 +235,7 @@ struct LibraryView: View {
                                     self.navigationPath.removeAll()
                                     self.lastTab = self.selectedTab
                                     self.selectedTab = 2
+                                    SettingsManager.shared.activeRoute = .plans
                                 }
                             }
                         )
@@ -250,8 +252,22 @@ struct LibraryView: View {
                         .padding(.trailing, 16)
                     }
                 }
+
             }
         )
+        .alert("Library Limit Reached", isPresented: $showingLimitAlert) {
+            Button("OK", role: .cancel) { }
+            Button("Upgrade") {
+                DispatchQueue.main.async {
+                    self.navigationPath.removeAll()
+                    self.lastTab = self.selectedTab
+                    self.selectedTab = 2
+                    SettingsManager.shared.activeRoute = .plans
+                }
+            }
+        } message: {
+            Text("With the Free plan, your library is limited to 10 books. Remove a book or upgrade for an unlimited library.")
+        }
     }
     
     func hideWelcomeHint() {
@@ -284,10 +300,21 @@ struct LibraryView: View {
     func handleImport(result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
+            let plan = audioController.entitlementManager.currentPlan
+            let maxBooks = plan.capabilities.maxBooks
+            let capacity = libraryManager.remainingBookCapacity(maxBooks: maxBooks)
+            
+            var allowedCount = 0
             for url in urls {
-                // Task for async work
-                Task {
-                    await libraryManager.importBook(from: url)
+                if allowedCount < capacity {
+                    allowedCount += 1
+                    Task {
+                        await libraryManager.importBook(from: url)
+                    }
+                } else {
+                    withAnimation {
+                        showingLimitAlert = true
+                    }
                 }
             }
         case .failure(let error):
@@ -461,7 +488,7 @@ struct LibraryStatusSheet: View {
                 }) {
                     (Text("With the Free plan, the library is limited to 10 books. ")
                         .foregroundColor(.primary) +
-                    Text("Subscribe")
+                    Text("Upgrade")
                         .underline()
                         .foregroundColor(.blue) +
                     Text(" for an unlimited library.")

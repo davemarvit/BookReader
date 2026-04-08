@@ -43,6 +43,8 @@ class AudioController: NSObject, ObservableObject {
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
     @Published var premiumMinutesExhaustedEvent: Bool = false
+    @Published var showExhaustionModal: Bool = false
+    private var hasPresentedExhaustionModal: Bool = false
 
     @Published var isSessionActive: Bool = false
     @Published var diagnosticDetails: String = "Diagnostics: Initializing..."
@@ -145,8 +147,8 @@ class AudioController: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        // setupAudioSession()
-        // setupRemoteCommandCenter()
+        setupAudioSession()
+        setupRemoteCommandCenter()
         localSynthesizer.delegate = self
 
         gateController.$pendingGate
@@ -159,8 +161,14 @@ class AudioController: NSObject, ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 guard !self.isTransitioningPlayback else { return }
+                
                 if self.isPremiumActiveMode {
-                    self.isPlaying = (player.timeControlStatus == .playing || player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+                    if self.currentParagraphIndex >= self.paragraphs.count - 1 && player.currentItem == nil {
+                        self.isPlaying = false
+                        self.isSessionActive = false
+                    } else {
+                        self.isPlaying = (player.timeControlStatus == .playing || player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+                    }
                 }
             }
         }
@@ -220,6 +228,7 @@ class AudioController: NSObject, ObservableObject {
                         }
 
                         if self.currentParagraphIndex >= self.paragraphs.count - 1 {
+                            self.player.pause()
                             self.isPlaying = false
                             self.isSessionActive = false
                         }
@@ -242,6 +251,7 @@ class AudioController: NSObject, ObservableObject {
                     }
                     self.hasPlayedExhaustionCue = false
                     self.premiumMinutesExhaustedEvent = false
+                    self.hasPresentedExhaustionModal = false
                 }
                 
                 guard self.isPlaying else { return }
@@ -1057,6 +1067,10 @@ class AudioController: NSObject, ObservableObject {
             
             if entitlementManager.isPremiumExhausted() && resolvedMode == .standard && !hasPlayedExhaustionCue {
                 hasPlayedExhaustionCue = true
+                if !self.hasPresentedExhaustionModal {
+                    self.hasPresentedExhaustionModal = true
+                    self.showExhaustionModal = true
+                }
                 #if DEBUG
                 print("[CUE] Playing exhaustion cue")
                 #endif
@@ -1578,8 +1592,10 @@ class AudioController: NSObject, ObservableObject {
         let targetIndex = hasNextParagraph ? completedIndex + 1 : completedIndex
         
         Task { @MainActor in
-            // Emit non-blocking inline visual indication passively
-            self.entitlementManager.showUpgradeBanner = true
+            if !self.hasPresentedExhaustionModal {
+                self.hasPresentedExhaustionModal = true
+                self.showExhaustionModal = true
+            }
             
             // Hard bind the Voice Mode constraint internally
             self.voiceModeController.forceMode(.standard)
@@ -1612,6 +1628,7 @@ class AudioController: NSObject, ObservableObject {
             if hasNextParagraph {
                 self.transitionAndContinuePlayback(to: targetIndex, shouldPlay: true, markTemporarilyUnavailable: false)
             } else {
+                self.player.pause()
                 self.isPlaying = false
                 self.isSessionActive = false
             }
@@ -1705,6 +1722,12 @@ extension AudioController: @preconcurrency AVSpeechSynthesizerDelegate {
         if !isTransitioningPlayback { isPlaying = true }
     }
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) { if !isTransitioningPlayback { isPlaying = false } }
+    
+    func clearExhaustionState() {
+        DispatchQueue.main.async {
+            self.showExhaustionModal = false
+        }
+    }
 }
 
 

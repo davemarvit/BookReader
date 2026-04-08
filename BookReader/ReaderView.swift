@@ -25,8 +25,6 @@ struct ReaderView: View {
     @State private var isInitialLoad = true
     
     // Exhaustion Modal State
-    @State private var showExhaustionModal = false
-    @State private var hasPresentedExhaustionModal = false
     
     @Environment(\.presentationMode) var presentationMode
     @State private var showingControls = true
@@ -142,12 +140,6 @@ struct ReaderView: View {
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 8) {
                     // Loading block purposefully relocated to top header overlay to prevent text occlusion
-                    
-                    if audioController.entitlementManager.showUpgradeBanner {
-                        UpgradeBannerView()
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                            .padding(.bottom, 4)
-                    }
                     
                     if showingControls {
                         ReaderControlsView(
@@ -352,7 +344,7 @@ struct ReaderView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     
-                    Button("Upgrade (Coming Soon)") {
+                    Button("Upgrade") {
                         audioController.gateController.resolvePendingGate(with: .cancel)
                     }
                     .buttonStyle(.bordered)
@@ -365,56 +357,15 @@ struct ReaderView: View {
             VoiceModeSheetView(isPresented: $showingVoiceModeSheet, state: bannerState)
                 .environmentObject(audioController)
         }
-        .onChange(of: audioController.premiumMinutesExhaustedEvent) { isExhausted in
-            if isExhausted && !hasPresentedExhaustionModal {
-                hasPresentedExhaustionModal = true
-                showExhaustionModal = true
-            } else if !isExhausted {
-                hasPresentedExhaustionModal = false
+        .overlay {
+            if audioController.showExhaustionModal {
+                ExhaustionModalView(isPresented: $audioController.showExhaustionModal, onOpenSettings: onOpenSettings)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.2), value: audioController.showExhaustionModal)
             }
         }
-        .overlay {
-            if showExhaustionModal {
-                ZStack {
-                    Color.black.opacity(0.35)
-                        .ignoresSafeArea()
-                    
-                    VStack(spacing: 24) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 64))
-                            .foregroundColor(.orange)
-                            .padding(.bottom, 8)
-                        Text("Enhanced Audio Used Up")
-                            .font(.title2)
-                            .fontWeight(.bold)
-                        Text("You’ve used up your Enhanced Audio for this month. You can subscribe to keep listening with Enhanced Audio, or continue with Basic Audio.")
-                            .font(.body)
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal)
-                        
-                        VStack(spacing: 12) {
-                            Button("Subscribe") {
-                                showExhaustionModal = false
-                                onOpenSettings?()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            
-                            Button("Continue with Basic") {
-                                showExhaustionModal = false
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                    .padding(32)
-                    .background(settings.currentTheme.backgroundColor)
-                    .cornerRadius(16)
-                    .shadow(color: Color.black.opacity(0.2), radius: 20)
-                    .padding(.horizontal, 24)
-                }
-                .transition(.opacity)
-                .animation(.easeInOut(duration: 0.2), value: showExhaustionModal)
-            }
+        .onDisappear {
+            audioController.clearExhaustionState()
         }
     } // End Body
     
@@ -987,45 +938,86 @@ struct ReaderTextView: View {
     }
 }
 
-struct UpgradeBannerView: View {
+struct ExhaustionModalView: View {
     @EnvironmentObject var audioController: AudioController
     @ObservedObject var settings = SettingsManager.shared
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "sparkles")
-                .foregroundColor(.yellow)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Enhanced Audio Ended")
-                    .font(.subheadline.bold())
-                Text("Playing Basic audio. Upgrade to resume.")
-                    .font(.caption)
-                    .foregroundColor(settings.currentTheme.textColor.opacity(0.8))
-                    .lineLimit(1)
-            }
-            Spacer()
-            
-            Button("Upgrade") {
-                // Future monetization hook / Launch paywall
-                audioController.entitlementManager.showUpgradeBanner = false
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            
-            Button {
-                withAnimation { audioController.entitlementManager.showUpgradeBanner = false }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.callout)
-                    .foregroundColor(settings.currentTheme.textColor.opacity(0.6))
-                    .padding(.leading, 4)
-            }
+    @Binding var isPresented: Bool
+    var onOpenSettings: (() -> Void)?
+    
+    var waveformAssetName: String {
+        switch settings.currentTheme {
+        case .light:
+            return "waveform_light"
+        case .sepia:
+            return "waveform_sepia"
+        case .dark:
+            return "waveform_black"
+        case .lowContrastDark:
+            return "waveform_black_low_contrast"
+        default:
+            return "waveform_light"
         }
-        .padding(12)
-        .background(settings.currentTheme.backgroundColor)
-        .cornerRadius(12)
-        .shadow(color: Color.black.opacity(0.15), radius: 8, y: 4)
-        .padding(.horizontal)
+    }
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.08)
+                .ignoresSafeArea()
+            
+            let plan = audioController.entitlementManager.currentPlan
+            let isFree = plan == .free
+            
+            VStack(spacing: 20) {
+                Image(waveformAssetName)
+                    .resizable()
+                    .scaledToFit()
+                    .background(Color.clear)
+                    .clipShape(Rectangle())
+                    .frame(height: 100)
+                    .padding(.bottom, 8)
+                    
+                Text(isFree ? "Free Enhanced Audio Monthly Limit Reached" : "Your Monthly Enhanced Audio Limit Reached")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .multilineTextAlignment(.center)
+                    
+                Text("You’ve used up your Enhanced Audio.\n\nYou’ll get another {X} starting {Y}.\n\nUpgrade to keep listening with Enhanced Audio,\nor continue with Basic Audio.")
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.primary.opacity(0.8))
+                    .padding(.horizontal)
+                
+                VStack(spacing: 4) {
+                    Text("Resets next month.")
+                        .font(.footnote)
+                        .foregroundColor(settings.currentTheme.textColor.opacity(0.7))
+                }
+                
+                VStack(spacing: 12) {
+                    Button("Upgrade") {
+                        isPresented = false
+                        audioController.clearExhaustionState()
+                        SettingsManager.shared.activeRoute = nil
+                        onOpenSettings?()
+                        DispatchQueue.main.async {
+                            SettingsManager.shared.activeRoute = .plans
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    
+                    Button("Continue with Basic Audio") {
+                        isPresented = false
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(28)
+            .background(.ultraThinMaterial)
+            .cornerRadius(16)
+            .shadow(color: Color.black.opacity(0.35), radius: 40, x: 0, y: 10)
+            .padding(.horizontal, 56)
+            .offset(y: 15)
+        }
     }
 }
 
@@ -1038,8 +1030,6 @@ struct ReaderControlsView: View {
     
     @State private var wasPlayingBeforeDrag = false
     @State private var localClampMessage: String? = nil
-    @State private var localExhaustionMessage: String? = nil
-    @State private var hasShownExhaustionMessage = false
     
     var body: some View {
         VStack(spacing: 20) {
@@ -1151,15 +1141,6 @@ struct ReaderControlsView: View {
                             .background(Color.black.opacity(0.8).cornerRadius(8))
                             .transition(.opacity)
                     }
-                    if let msg = localExhaustionMessage {
-                        Text(msg)
-                            .font(.caption.bold())
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.black.opacity(0.8).cornerRadius(8))
-                            .transition(.opacity)
-                    }
                 }
                 .offset(y: -40)
             )
@@ -1174,21 +1155,6 @@ struct ReaderControlsView: View {
                             localClampMessage = nil
                         }
                         audioController.lastSpeedClampEvent = nil
-                    }
-                }
-            }
-            .onChange(of: audioController.premiumMinutesExhaustedEvent) { isExhausted in
-                if isExhausted && !hasShownExhaustionMessage {
-                    hasShownExhaustionMessage = true
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        localExhaustionMessage = "Enhanced audio used up for this month."
-                    }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-                        if localExhaustionMessage != nil {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                localExhaustionMessage = nil
-                            }
-                        }
                     }
                 }
             }
@@ -1354,13 +1320,26 @@ struct VoiceModeSheetView: View {
     @Binding var isPresented: Bool
     let state: ReaderView.ReaderBannerState
     
+    var waveformAssetName: String {
+        switch SettingsManager.shared.currentTheme {
+        case .light: return "waveform_light"
+        case .sepia: return "waveform_sepia"
+        case .dark: return "waveform_black"
+        case .lowContrastDark: return "waveform_black_low_contrast"
+        default: return "waveform_light"
+        }
+    }
+    
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
                 // Header icon
-                Image(systemName: "waveform")
-                    .font(.system(size: 48))
-                    .foregroundColor(.accentColor)
+                Image(waveformAssetName)
+                    .resizable()
+                    .scaledToFit()
+                    .background(Color.clear)
+                    .clipShape(Rectangle())
+                    .frame(height: 70)
                     .padding(.top, 20)
                 
                 Text(title)
@@ -1373,6 +1352,7 @@ struct VoiceModeSheetView: View {
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)
                     .padding(.horizontal)
+                    .fixedSize(horizontal: false, vertical: true)
                 
                 Spacer()
                 
@@ -1405,16 +1385,15 @@ struct VoiceModeSheetView: View {
     var message: String {
         switch state {
         case .basicNotSubscribed:
-            return "You are listening in Basic Audio. Enhanced Audio requires a subscription."
+            return "You are listening with Basic Audio. Enhanced Audio requires an upgrade."
         case .basicEnhancedAvailable:
-            return "Enhanced Audio is included for your account. You are currently using Basic Audio. You can stay in Basic to conserve Enhanced time or switch back now."
+            return "Enhanced Audio is included for your account. You are currently listening with Basic Audio. You can stay in Basic to conserve Enhanced time or switch back now."
         case .basicTemporarilyUnavailable:
             return "Enhanced Audio is included for your account. It is temporarily unavailable right now. Playback has fallen back to Basic so reading can continue."
         case .basicEnhancedExhausted:
-            // TODO: If the codebase already has access to the monthly reset / subscription anniversary date, show it.
-            return "Your current Enhanced Audio time has been used up for this billing period. You can continue in Basic Audio for now.\n\nNew Enhanced Audio time will be added on your monthly renewal date."
+            return "You’ve used up your Enhanced Audio.\n\nYou’ll get another {X} starting {Y}.\n\nUpgrade to keep listening with Enhanced Audio,\nor continue with Basic Audio."
         case .enhanced:
-            return "You are currently listening in Enhanced Audio."
+            return "You are currently listening with Enhanced Audio."
         }
     }
     
@@ -1449,13 +1428,12 @@ struct VoiceModeSheetView: View {
                 .buttonStyle(.bordered)
             
         case .basicEnhancedExhausted:
-            Button("Keep Using Basic Audio") { isPresented = false }
-                .buttonStyle(.bordered)
-            // TODO: If account type is Reader and upgrade info is available, offer Upgrade
-            Button("Upgrade (Coming Soon)") {
+            Button("Upgrade") {
                 isPresented = false
             }
             .buttonStyle(.borderedProminent)
+            Button("Continue with Basic Audio") { isPresented = false }
+                .buttonStyle(.bordered)
             
         case .enhanced:
             Button("Keep Using Enhanced Audio") { isPresented = false }

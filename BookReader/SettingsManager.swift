@@ -3,6 +3,13 @@
 import Foundation
 import SwiftUI
 
+import SwiftUI
+
+public enum SettingsRoute: String {
+    case plans
+    case manage
+}
+
 enum ReaderTheme: String, CaseIterable, Identifiable {
     case system, light, dark, lowContrastDark, sepia
     var id: String { self.rawValue }
@@ -71,6 +78,9 @@ class SettingsManager: ObservableObject {
     @AppStorage("selectedAppleVoiceID") var selectedAppleVoiceID: String = "" // Default System Voice (empty = default)
     @AppStorage("preferredEngine") var preferredEngine: String = "apple" // apple, google
     @AppStorage("librarySortOption") var librarySortOption: String = "recent" // recent, title, author
+    
+    @Published var activeRoute: SettingsRoute? = nil
+    
     
     // Reader Appearance
     @AppStorage("readerFontSize") var readerFontSize: Double = 18.0

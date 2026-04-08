@@ -143,6 +143,11 @@ class LibraryManager: ObservableObject {
         return newBook
     }
     
+    func remainingBookCapacity(maxBooks: Int?) -> Int {
+        guard let maxLimit = maxBooks else { return Int.max } // nil means unlimited
+        return Swift.max(0, maxLimit - books.count)
+    }
+    
     func getCoverURL(for book: BookMetadata) -> URL? {
         guard let filename = book.coverFilename else { return nil }
         return booksDirectory.appendingPathComponent(filename)
