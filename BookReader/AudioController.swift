@@ -389,35 +389,62 @@ class AudioController: NSObject, ObservableObject {
     }
 
     func applyBookContent(_ prepared: PreparedBookContent) {
+        defer { print("[APPLY] defer reached") }
+        print("[APPLY] enter")
+        print("[APPLY] bookID = \(prepared.bookID)")
+        print("[APPLY] paragraphs.count = \(prepared.paragraphs.count)")
+        print("[APPLY] safeInitialIndex = \(prepared.safeInitialIndex)")
+        print("[APPLY] rawInitialIndex = \(prepared.rawInitialIndex)")
+
         print("AUDIO CONTROLLER APPLY ID:", ObjectIdentifier(self))
         if self.currentBookID == prepared.bookID && !self.paragraphs.isEmpty {
             print("SKIPPING APPLY — SAME BOOK")
+            print("[APPLY] exit")
             return
         }
 
+        print("[APPLY] before stopEverything")
         self.stopEverything()
+        print("[APPLY] after stopEverything")
         
+        print("[APPLY] before markPremiumTemporarilyUnavailable")
         self.voiceModeController.markPremiumTemporarilyUnavailable(false)
+        print("[APPLY] after markPremiumTemporarilyUnavailable")
         print("[RECOVERY] temporary-unavailable cleared on reset (applyBookContent)")
 
         self.currentBookID = prepared.bookID
+        print("[APPLY] set currentBookID")
         self.bookTitle = prepared.title
+        print("[APPLY] set bookTitle")
         self.coverImage = prepared.cover
+        print("[APPLY] set coverImage")
         self.paragraphs = prepared.paragraphs
+        print("[APPLY] set paragraphs count = \(self.paragraphs.count)")
         self.totalParagraphs = self.paragraphs.count
+        print("[APPLY] set totalParagraphs = \(self.totalParagraphs)")
 
         self.currentParagraphIndex = prepared.safeInitialIndex
+        print("[APPLY] set currentParagraphIndex = \(self.currentParagraphIndex)")
 
         if prepared.safeInitialIndex != prepared.rawInitialIndex {
+            print("[APPLY] before updateProgress")
             libraryManager?.updateProgress(for: prepared.bookID, index: prepared.safeInitialIndex)
+            print("[APPLY] after updateProgress")
         }
 
         self.audioCache.removeAll()
+        print("[APPLY] cleared audioCache")
         self.downloadTasks.values.forEach { $0.cancel() }
         self.downloadTasks.removeAll()
+        print("[APPLY] cleared downloadTasks")
         self.playbackGeneration = UUID()
+        print("[APPLY] reset playbackGeneration")
         self.highestEnqueuedIndex = -1
+        print("[APPLY] reset highestEnqueuedIndex")
         self.queueMaintenanceTask?.cancel()
+        print("[APPLY] canceled queueMaintenanceTask")
+        
+        print("[APPLY] exit")
     }
 
     func loadBook(text: String, bookID: UUID, title: String, cover: UIImage?, initialIndex: Int = 0) {

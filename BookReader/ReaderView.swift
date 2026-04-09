@@ -625,6 +625,9 @@ struct ReaderTextView: View {
                         return nil
                     }()
                     
+                    print("[DEBUG] document.text.count = \(document.text.count)")
+                    print("[DEBUG] document.text.prefix = \(String(document.text.prefix(80)))")
+                    
                     let prepared = audioController.prepareBookContent(
                         text: document.text,
                         bookID: bookID,
@@ -633,9 +636,20 @@ struct ReaderTextView: View {
                         initialIndex: book?.lastParagraphIndex ?? 0
                     )
                     
+                    print("[DEBUG] prepared.paragraphs.count = \(prepared.paragraphs.count)")
+                    if let first = prepared.paragraphs.first {
+                        print("[DEBUG] first paragraph prefix = \(String(first.prefix(80)))")
+                    } else {
+                        print("[DEBUG] first paragraph is nil")
+                    }
+                    
                     await MainActor.run {
                         if debugReadAlongTrace { print("[ReadAlongTrace] task-before-apply \(traceStateString)") }
                         audioController.applyBookContent(prepared)
+                        
+                        print("[DEBUG] after apply: paragraphs.count = \(audioController.paragraphs.count)")
+                        print("[DEBUG] after apply: currentBookID = \(String(describing: audioController.currentBookID))")
+                        
                         if debugReadAlongTrace { print("[ReadAlongTrace] task-after-apply \(traceStateString)") }
                     }
                 }
