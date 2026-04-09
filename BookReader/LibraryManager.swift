@@ -197,15 +197,21 @@ class LibraryManager: ObservableObject {
     func updateCover(for book: BookMetadata, image: UIImage) {
         guard let data = image.jpegData(compressionQuality: 0.8) else { return }
         
-        let coverName = book.coverFilename ?? (UUID().uuidString + ".jpg")
-        let coverURL = booksDirectory.appendingPathComponent(coverName)
+        let oldCoverName = book.coverFilename
+        let newCoverName = UUID().uuidString + ".jpg"
+        let coverURL = booksDirectory.appendingPathComponent(newCoverName)
         
         do {
             try data.write(to: coverURL)
             
-            // Update metadata if filename was new
+            if let old = oldCoverName, old != newCoverName {
+                let oldURL = booksDirectory.appendingPathComponent(old)
+                try? fileManager.removeItem(at: oldURL)
+            }
+            
+            // Update metadata
             if let idx = books.firstIndex(where: { $0.id == book.id }) {
-                books[idx].coverFilename = coverName
+                books[idx].coverFilename = newCoverName
                 saveLibrary()
                 
                 // Force UI update

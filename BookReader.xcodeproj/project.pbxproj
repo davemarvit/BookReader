@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		5587783E2F872E1700292979 /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = 5587783D2F872E1700292979 /* RevenueCat */; };
+		558778402F872E1700292979 /* RevenueCatUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5587783F2F872E1700292979 /* RevenueCatUI */; };
 		55FB40282F78E7BF00B31D89 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 557231B42F766FCA00B2571E /* ZIPFoundation */; };
 /* End PBXBuildFile section */
 
@@ -79,7 +81,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5587783E2F872E1700292979 /* RevenueCat in Frameworks */,
 				55FB40282F78E7BF00B31D89 /* ZIPFoundation in Frameworks */,
+				558778402F872E1700292979 /* RevenueCatUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -158,6 +162,8 @@
 			name = BookReaderMonetization;
 			packageProductDependencies = (
 				557231B42F766FCA00B2571E /* ZIPFoundation */,
+				5587783D2F872E1700292979 /* RevenueCat */,
+				5587783F2F872E1700292979 /* RevenueCatUI */,
 			);
 			productName = BookReader;
 			productReference = 557231BD2F766FCA00B2571E /* BookReaderMonetization.app */;
@@ -265,6 +271,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				55FB40802F78E7D100B31D89 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+				5587783C2F872E1700292979 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5577B0852F260B7B0031F12B /* Products */;
@@ -723,6 +730,14 @@
 				minimumVersion = 0.9.20;
 			};
 		};
+		5587783C2F872E1700292979 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/RevenueCat/purchases-ios-spm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.67.1;
+			};
+		};
 		55FB40802F78E7D100B31D89 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
@@ -738,6 +753,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 557231B52F766FCA00B2571E /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
 			productName = ZIPFoundation;
+		};
+		5587783D2F872E1700292979 /* RevenueCat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5587783C2F872E1700292979 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCat;
+		};
+		5587783F2F872E1700292979 /* RevenueCatUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 5587783C2F872E1700292979 /* XCRemoteSwiftPackageReference "purchases-ios-spm" */;
+			productName = RevenueCatUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

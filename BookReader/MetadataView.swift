@@ -40,9 +40,16 @@ struct MetadataView: View {
     @State private var coverUrlString = ""
     @State private var isDownloading = false
     
+    @State private var coverUpdateTrigger = UUID()
+    
+    // Always use the latest data from the observable library
+    private var currentBook: BookMetadata {
+        libraryManager.books.first(where: { $0.id == book.id }) ?? book
+    }
+    
     var currentProgressText: String {
-        let total = book.totalParagraphs ?? 1
-        let progressIdx = book.lastParagraphIndex
+        let total = currentBook.totalParagraphs ?? 1
+        let progressIdx = currentBook.lastParagraphIndex
         let rawProgress = Double(progressIdx) / Double(total > 0 ? total : 1)
         return "\(Int(rawProgress * 100))% read"
     }
@@ -127,22 +134,23 @@ struct MetadataView: View {
             }
             .onChange(of: inputImage) { newImage in
                 if let image = newImage {
-                    libraryManager.updateCover(for: book, image: image)
+                    libraryManager.updateCover(for: currentBook, image: image)
+                    coverUpdateTrigger = UUID()
                 }
             }
             .overlay(overlayContent)
             .onAppear {
-                self.title = book.title
-                self.author = book.author ?? ""
-                self.notes = book.notes ?? ""
-                self.summary = book.summary ?? ""
-                self.tags = book.tags?.joined(separator: ", ") ?? ""
+                self.title = currentBook.title
+                self.author = currentBook.author ?? ""
+                self.notes = currentBook.notes ?? ""
+                self.summary = currentBook.summary ?? ""
+                self.tags = currentBook.tags?.joined(separator: ", ") ?? ""
             }
     }
     
     @ViewBuilder
     private var coverSection: some View {
-        if let coverURL = libraryManager.getCoverURL(for: book) {
+        if let coverURL = libraryManager.getCoverURL(for: currentBook) {
             AsyncImage(url: coverURL) { phase in
                 switch phase {
                 case .empty: ProgressView().frame(height: 300)
@@ -156,6 +164,7 @@ struct MetadataView: View {
                 @unknown default: EmptyView()
                 }
             }
+            .id(coverUpdateTrigger)
             .shadow(color: Color.black.opacity(0.15), radius: 8, x: 0, y: 4)
             .padding(.bottom, 10)
         } else {
@@ -180,7 +189,7 @@ struct MetadataView: View {
             }
             
             InfoRow(label: "Progress", value: currentProgressText)
-            InfoRow(label: "Added", value: formatDate(book.dateAdded))
+            InfoRow(label: "Added", value: formatDate(currentBook.dateAdded))
             
             Divider()
             
@@ -285,7 +294,7 @@ struct MetadataView: View {
     
     private func reExtractTags() {
         isExtractingTags = true
-        let bookURL = libraryManager.getBookURL(for: book)
+        let bookURL = libraryManager.getBookURL(for: currentBook)
         Task {
             // Run parsing on a background thread without capturing main-actor state
             let newTags: [String] = await Task.detached(priority: .userInitiated) {
@@ -302,11 +311,11 @@ struct MetadataView: View {
     
     private func toggleEditMode() {
         if self.isEditing {
-            self.libraryManager.updateTitle(for: self.book, title: self.title)
-            self.libraryManager.updateAuthor(for: self.book, author: self.author)
-            self.libraryManager.updateNotes(for: self.book, notes: self.notes)
+            self.libraryManager.updateTitle(for: self.currentBook, title: self.title)
+            self.libraryManager.updateAuthor(for: self.currentBook, author: self.author)
+            self.libraryManager.updateNotes(for: self.currentBook, notes: self.notes)
             let tagsArray = self.parsedTags
-            self.libraryManager.updateMetadataFields(for: self.book, summary: self.summary, tags: tagsArray.isEmpty ? nil : tagsArray)
+            self.libraryManager.updateMetadataFields(for: self.currentBook, summary: self.summary, tags: tagsArray.isEmpty ? nil : tagsArray)
         }
         withAnimation {
             self.isEditing.toggle()
@@ -327,7 +336,8 @@ struct MetadataView: View {
                 let (data, _) = try await URLSession.shared.data(from: url)
                 if let image = UIImage(data: data) {
                     await MainActor.run {
-                        libraryManager.updateCover(for: book, image: image)
+                        libraryManager.updateCover(for: currentBook, image: image)
+                        coverUpdateTrigger = UUID()
                         coverUrlString = ""
                         isDownloading = false
                     }

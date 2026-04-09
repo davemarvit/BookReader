@@ -354,7 +354,7 @@ struct ReaderView: View {
             .interactiveDismissDisabled()
         }
         .sheet(isPresented: $showingVoiceModeSheet) {
-            VoiceModeSheetView(isPresented: $showingVoiceModeSheet, state: bannerState)
+            VoiceModeSheetView(isPresented: $showingVoiceModeSheet, state: bannerState, onOpenSettings: onOpenSettings)
                 .environmentObject(audioController)
         }
         .overlay {
@@ -1333,6 +1333,7 @@ struct VoiceModeSheetView: View {
     @EnvironmentObject var audioController: AudioController
     @Binding var isPresented: Bool
     let state: ReaderView.ReaderBannerState
+    var onOpenSettings: (() -> Void)?
     
     var waveformAssetName: String {
         switch SettingsManager.shared.currentTheme {
@@ -1418,8 +1419,12 @@ struct VoiceModeSheetView: View {
             Button("Keep Using Basic Audio") { isPresented = false }
                 .buttonStyle(.bordered)
             Button("Upgrade") { 
-                // TODO: Wire to billing flow
                 isPresented = false 
+                SettingsManager.shared.activeRoute = nil
+                onOpenSettings?()
+                DispatchQueue.main.async {
+                    SettingsManager.shared.activeRoute = .plans
+                }
             }
             .buttonStyle(.borderedProminent)
             
@@ -1444,6 +1449,11 @@ struct VoiceModeSheetView: View {
         case .basicEnhancedExhausted:
             Button("Upgrade") {
                 isPresented = false
+                SettingsManager.shared.activeRoute = nil
+                onOpenSettings?()
+                DispatchQueue.main.async {
+                    SettingsManager.shared.activeRoute = .plans
+                }
             }
             .buttonStyle(.borderedProminent)
             Button("Continue with Basic Audio") { isPresented = false }

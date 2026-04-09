@@ -455,8 +455,8 @@ class DocumentParser {
         var text = html
         
         // 1. Remove style/script blocks
-        text = text.replacingOccurrences(of: "<script.*?</script>", with: "", options: [.regularExpression, .caseInsensitive])
-        text = text.replacingOccurrences(of: "<style.*?</style>", with: "", options: [.regularExpression, .caseInsensitive])
+        text = text.replacingOccurrences(of: "(?is)<script\\b[^>]*>.*?</script>", with: "", options: [.regularExpression])
+        text = text.replacingOccurrences(of: "(?is)<style\\b[^>]*>.*?</style>", with: "", options: [.regularExpression])
         
         // 2. Replace block tags with double newlines
         let blockTags = ["p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "br"]

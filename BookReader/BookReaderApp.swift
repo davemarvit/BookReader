@@ -1,7 +1,11 @@
 import SwiftUI
+import RevenueCat
 
 @main
 struct BookReaderApp: App {
+    init() {
+ //       Purchases.configure(withAPIKey: "test_tHUwnlVAAiOTGzyqihAUYAqpvkM")
+    }
     @StateObject private var libraryManager = LibraryManager()
     @StateObject private var audioController = AudioController()
 

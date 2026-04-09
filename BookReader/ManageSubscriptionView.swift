@@ -12,7 +12,7 @@ struct ManageSubscriptionView: View {
             Section(header: Text("Current Subscription")) {
                 LabeledContent("Plan", value: currentPlan.displayName)
                 
-                let monthlyAudio = currentPlan == .free ? "20 minutes/month" : (currentPlan == .reader ? "10 hours/month" : "25 hours/month")
+                let monthlyAudio = currentPlan == .free ? "20 minutes/month" : (currentPlan == .reader ? "10 hours/month" : "20 hours/month")
                 LabeledContent("Monthly Enhanced Audio", value: monthlyAudio)
                 
                 // Stub values for missing info safely
@@ -29,22 +29,25 @@ struct ManageSubscriptionView: View {
             Section(header: Text("Manage")) {
                 if currentPlan == .free {
                     Button(action: {
-                        // Route to Reader purchase flow
+                        // Route to Avid Reader purchase flow
                     }) {
                         VStack(alignment: .leading) {
-                            Text("Upgrade to Reader").foregroundColor(.blue)
-                            Text("10 hours/month of enhanced audio, unlimited library, playback up to 4×")
+                            HStack(spacing: 6) {
+                                Text("Upgrade to Avid Reader").foregroundColor(.blue)
+                                Text("· (Best value)").foregroundColor(.blue)
+                            }
+                            Text("~2 books/month (20 hours of enhanced audio), unlimited library, playback up to 4x")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
                     }
                     
                     Button(action: {
-                        // Route to Avid Reader purchase flow
+                        // Route to Reader purchase flow
                     }) {
                         VStack(alignment: .leading) {
-                            Text("Upgrade to Avid Reader").foregroundColor(.blue)
-                            Text("25 hours/month of enhanced audio, unlimited library, playback up to 4×")
+                            Text("Upgrade to Reader").foregroundColor(.blue)
+                            Text("~1 book per month (10 hours per month of enhanced audio), unlimited library, playback up to 4x")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -55,8 +58,11 @@ struct ManageSubscriptionView: View {
                         // Route to Avid Reader purchase flow
                     }) {
                         VStack(alignment: .leading) {
-                            Text("Upgrade to Avid Reader").foregroundColor(.blue)
-                            Text("25 hours/month of enhanced audio, unlimited library, playback up to 4×")
+                            HStack(spacing: 6) {
+                                Text("Upgrade to Avid Reader").foregroundColor(.blue)
+                                Text("· (Best value)").foregroundColor(.blue)
+                            }
+                            Text("~2 books/month (20 hours of enhanced audio), unlimited library, playback up to 4x")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -79,7 +85,7 @@ struct ManageSubscriptionView: View {
                     }) {
                         VStack(alignment: .leading) {
                             Text("Downgrade to Reader").foregroundColor(.blue)
-                            Text("10 hours/month of enhanced audio, unlimited library, playback up to 4×")
+                            Text("~1 book per month (10 hours per month of enhanced audio), unlimited library, playback up to 4x")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -98,7 +104,7 @@ struct ManageSubscriptionView: View {
                 }
             }
         }
-        .navigationTitle("Manage Subscription")
+        .navigationTitle("Manage Account")
         .navigationBarTitleDisplayMode(.inline)
     }
 }

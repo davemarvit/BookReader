@@ -24,11 +24,16 @@ struct SettingsView: View {
         "en-US-Journey-D": "Google Journey D (Male, Ultra)",
         "en-US-Journey-F": "Google Journey F (Female, Ultra)",
         "en-US-Neural2-A": "Google Neural A (Male, Premium)",
-        "en-US-Neural2-F": "Google Neural F (Female, Premium)"
+        "en-US-Neural2-F": "Google Neural F (Female, Premium)",
+        "en-US-Chirp-HD-D": "Experimental • Chirp HD (High Quality)",
+        "en-US-Studio-M": "Experimental • Studio (Ultra Quality)"
     ]
     
     var sortedVoiceKeys: [String] {
-        return voices.keys.sorted()
+        let all = voices.keys.sorted()
+        let production = all.filter { !(voices[$0]?.starts(with: "Experimental") ?? false) }
+        let experimental = all.filter { voices[$0]?.starts(with: "Experimental") ?? false }
+        return production + experimental
     }
     
     var body: some View {
