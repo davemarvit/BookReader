@@ -159,15 +159,22 @@ class DocumentParser {
     
     private static func parsePDF(url: URL) -> ParsedDocument? {
         guard let pdf = PDFDocument(url: url) else { return nil }
-        var fullText = ""
-        for i in 0..<pdf.pageCount {
-            if let page = pdf.page(at: i), let pageText = page.string {
-                fullText += pageText + "\n\n"
-            }
-        }
+        
         let rawTitle = pdf.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String
         let cleanTitle = rawTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let title = cleanTitle.isEmpty ? url.deletingPathExtension().lastPathComponent : cleanTitle
+        
+        var fullText = ""
+        for i in 0..<pdf.pageCount {
+            if let page = pdf.page(at: i), let pageText = page.string {
+                let cleanedPageText = PDFPageTextCleanup.cleanPageText(pageText, documentTitle: title)
+                fullText += cleanedPageText + "\n\n"
+            }
+        }
+        
+        fullText = PDFParagraphBoundaryNormalizer.normalize(fullText)
+        fullText = PDFImportTextCleanup.normalizeExtractedPDFText(fullText)
+        fullText = PDFParagraphSplitNormalizer.normalize(fullText)
         
         // Generate Thumbnail
         var coverData: Data? = nil

@@ -1,0 +1,42 @@
+all-around all-out all-time back-and-forth blow-by-blow blue-green
+brother-in-law built-in by-product co-author co-chair co-editor
+co-founder co-host co-manager co-occurrence co-occupant co-operation
+co-operator co-owner co-worker cross-check decision-making
+editor-in-chief e-mail ex-wife eye-opening fact-finding far-reaching
+first-class first-rate follow-up free-for-all full-length full-scale
+full-time good-looking half-dozen half-hour half-life hard-earned
+high-level high-speed ill-fated ill-fitting ill-timed in-depth
+judge-made know-how large-scale left-hand life-size line-by-line
+long-range long-running long-term low-cost low-key matter-of-fact
+middle-aged mother-in-law never-ending non-english non-fiction non-human
+non-linear non-profit off-campus old-fashioned one-sided on-site
+open-ended part-time problem-solving re-create re-election re-emerge
+re-entry re-examine re-introduce re-open re-read re-start right-hand
+risk-taking runner-up self-aware self-confidence self-contained
+self-control self-esteem self-interest self-knowledge self-made
+self-restraint short-term state-of-the-art step-by-step t-shirt
+up-to-date well-being well-known world-class x-ray co-design co-develop
+co-direct co-exist co-invest co-lead co-locate co-produce co-sponsor
+co-teach co-write re-align re-allocate re-analyze re-apply re-assess
+re-balance re-build re-calculate re-classify re-code re-commit
+re-configure re-connect re-construct re-consider re-design re-develop
+re-discover re-distribute re-engineer re-evaluate re-execute re-express
+re-frame re-generate re-group re-imagine re-implement re-integrate
+re-interpret re-invent re-launch re-locate re-model re-organize
+re-phrase re-plan re-position re-process re-program re-project
+re-structure re-target re-test re-think re-train re-validate
+re-visualize high-performance low-latency real-time near-real-time
+user-facing machine-learning data-driven cloud-based edge-based
+mission-critical safety-critical cost-effective energy-efficient
+time-consuming labor-intensive knowledge-based evidence-based rule-based
+feature-rich resource-constrained memory-intensive compute-intensive
+latency-sensitive throughput-oriented multi-layer multi-modal
+multi-threaded multi-user multi-agent cross-platform cross-domain
+cross-functional end-to-end point-to-point peer-to-peer human-readable
+machine-readable open-source closed-loop feedback-driven goal-oriented
+task-specific domain-specific problem-specific context-aware
+privacy-preserving security-focused risk-aware bias-sensitive
+error-prone failure-tolerant fault-tolerant self-supervised
+semi-supervised unsupervised-learning supervised-learning
+reinforcement-learning deep-learning transfer-learning few-shot
+zero-shot
