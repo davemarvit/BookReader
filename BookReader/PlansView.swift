@@ -4,10 +4,8 @@ import RevenueCat
 struct PlansView: View {
     @EnvironmentObject var audioController: AudioController
     
-    // Safety check fallback
-    var currentPlan: Plan {
-        audioController.entitlementManager.currentPlan
-    }
+    @AppStorage("selectedTab") var selectedTab = 0
+    @State private var showingSuccessModal = false
     
     var body: some View {
         ScrollView {
@@ -51,6 +49,40 @@ struct PlansView: View {
         }
         .navigationTitle("Plans")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showingSuccessModal) {
+            VStack(spacing: 24) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 64))
+                    .foregroundColor(.green)
+                    .padding(.bottom, 8)
+                
+                let currentPlan = audioController.entitlementManager.currentPlan
+                Text(currentPlan == .avidReader ? "Welcome to Avid Reader" : "Welcome to Reader")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Text(currentPlan == .avidReader ? 
+                    "You now have up to 20 hours of enhanced audio each month, an unlimited library, and playback speeds up to 4x." :
+                    "You now have up to 10 hours of enhanced audio each month, an unlimited library, and playback speeds up to 4x.")
+                    .font(.body)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal)
+                
+                Button("Start Listening") {
+                    showingSuccessModal = false
+                    SettingsManager.shared.activeRoute = nil
+                    selectedTab = 0
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+            .padding(32)
+            .interactiveDismissDisabled()
+        }
+        .onAppear {
+            print("[VIEW] PlansView sees plan: \(audioController.entitlementManager.currentPlan)")
+        }
     }
     
     private var freeCard: some View {
@@ -104,6 +136,7 @@ struct PlansView: View {
     }
     
     private func planCard(title: String, price: String, features: [String], planType: Plan) -> some View {
+        let currentPlan = audioController.entitlementManager.currentPlan
         let isCurrent = currentPlan == planType
         // Emphasize based on routing conditions
         let isUpgrade = (currentPlan == .free && planType != .free) || (currentPlan == .reader && planType == .avidReader)
@@ -182,9 +215,13 @@ struct PlansView: View {
                             }
                             print("Purchasing package: \(packageIdentifier)")
                             let result = try await Purchases.shared.purchase(package: package)
-                            print("Purchase success")
+                            print("Purchase success: \(packageIdentifier)")
+                            print("Active Entitlements: \(result.customerInfo.entitlements.active.keys.sorted())")
                             await MainActor.run {
                                 audioController.entitlementManager.refreshFromRevenueCat(customerInfo: result.customerInfo)
+                                let resolvedPlan = audioController.entitlementManager.currentPlan
+                                print("Resolved Plan: \(resolvedPlan)")
+                                self.showingSuccessModal = true
                             }
                         } catch {
                             print("Purchase failure: \(error.localizedDescription)")

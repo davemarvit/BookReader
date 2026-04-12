@@ -177,6 +177,9 @@ struct SettingsView: View {
             showingPlans = false
             showingManage = false
         }
+        .onAppear {
+            print("[VIEW] SettingsView sees plan: \(audioController.entitlementManager.currentPlan)")
+        }
     }
     
     var apiKeyStatus: String {

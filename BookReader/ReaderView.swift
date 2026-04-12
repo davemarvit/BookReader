@@ -563,6 +563,7 @@ struct ReaderTextView: View {
                 updateReadAlongState(proxy: proxy)
             }
             .onAppear {
+                print("[VIEW] ReaderView sees plan: \(audioController.entitlementManager.currentPlan)")
                 if debugReadAlongTrace { print("[ReadAlongTrace] appear \(traceStateString)") }
                 resetReadAlongEntryState()
                 checkInitialReadiness(proxy: proxy)

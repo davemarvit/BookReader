@@ -10,7 +10,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var libraryManager: LibraryManager
     
-    @State private var selectedTab = 0
+    @AppStorage("selectedTab") var selectedTab = 0
     @State private var lastTab: Int = 0
     @State private var homeNavigationPath: [NavigationDestination] = []
     @State private var libraryNavigationPath: [NavigationDestination] = []

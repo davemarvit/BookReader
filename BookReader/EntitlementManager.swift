@@ -13,11 +13,18 @@ final class EntitlementManager: ObservableObject {
     @Published var lastResolvedSessionChoice: PlaybackGateChoice? = nil
     @Published var lastGateReason: String? = nil
     @Published var monthlyPremiumMinutesUsed: Double = 0
+    
+    init() {
+        print("[INIT] EntitlementManager created")
+    }
 
     /// Pulls the active tier from RevenueCat customer info.
     func refreshFromRevenueCat(customerInfo: CustomerInfo) {
-        let hasAvid = customerInfo.entitlements["avid_reader"]?.isActive == true
-        let hasReader = customerInfo.entitlements["reader"]?.isActive == true
+        let activeKeys = customerInfo.entitlements.active.keys.sorted()
+        print("Active Entitlements: \(activeKeys)")
+        
+        let hasAvid = activeKeys.contains("avid_reader")
+        let hasReader = activeKeys.contains("reader")
 
         if hasAvid {
             currentPlan = .avidReader
@@ -30,6 +37,8 @@ final class EntitlementManager: ObservableObject {
             premiumEntitlement = .requiresDecision
             lastResolvedSessionChoice = nil
         }
+        
+        print("Resolved Plan: \(currentPlan)")
     }
 
     /// Determines if a gate interface must be shown before continuing playback in the requested mode.
