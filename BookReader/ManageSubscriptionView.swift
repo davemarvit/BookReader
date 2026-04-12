@@ -1,4 +1,5 @@
 import SwiftUI
+import RevenueCat
 
 struct ManageSubscriptionView: View {
     @EnvironmentObject var audioController: AudioController
@@ -29,7 +30,16 @@ struct ManageSubscriptionView: View {
             Section(header: Text("Manage")) {
                 if currentPlan == .free {
                     Button(action: {
-                        // Route to Avid Reader purchase flow
+                        Task {
+                            do {
+                                let offerings = try await Purchases.shared.offerings()
+                                guard let package = offerings.current?.availablePackages.first(where: { $0.identifier == "avid_reader_monthly" }) else { return }
+                                let result = try await Purchases.shared.purchase(package: package)
+                                await MainActor.run {
+                                    audioController.entitlementManager.refreshFromRevenueCat(customerInfo: result.customerInfo)
+                                }
+                            } catch { }
+                        }
                     }) {
                         VStack(alignment: .leading) {
                             HStack(spacing: 6) {
@@ -43,7 +53,16 @@ struct ManageSubscriptionView: View {
                     }
                     
                     Button(action: {
-                        // Route to Reader purchase flow
+                        Task {
+                            do {
+                                let offerings = try await Purchases.shared.offerings()
+                                guard let package = offerings.current?.availablePackages.first(where: { $0.identifier == "reader_monthly" }) else { return }
+                                let result = try await Purchases.shared.purchase(package: package)
+                                await MainActor.run {
+                                    audioController.entitlementManager.refreshFromRevenueCat(customerInfo: result.customerInfo)
+                                }
+                            } catch { }
+                        }
                     }) {
                         VStack(alignment: .leading) {
                             Text("Upgrade to Reader").foregroundColor(.blue)
@@ -55,7 +74,16 @@ struct ManageSubscriptionView: View {
                     
                 } else if currentPlan == .reader {
                     Button(action: {
-                        // Route to Avid Reader purchase flow
+                        Task {
+                            do {
+                                let offerings = try await Purchases.shared.offerings()
+                                guard let package = offerings.current?.availablePackages.first(where: { $0.identifier == "avid_reader_monthly" }) else { return }
+                                let result = try await Purchases.shared.purchase(package: package)
+                                await MainActor.run {
+                                    audioController.entitlementManager.refreshFromRevenueCat(customerInfo: result.customerInfo)
+                                }
+                            } catch { }
+                        }
                     }) {
                         VStack(alignment: .leading) {
                             HStack(spacing: 6) {
@@ -69,7 +97,9 @@ struct ManageSubscriptionView: View {
                     }
                     
                     Button(action: {
-                        // Cancel intent handler
+                        if let window = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                            Task { try? await Purchases.shared.showManageSubscriptions(in: window) }
+                        }
                     }) {
                         VStack(alignment: .leading) {
                             Text("Cancel Subscription").foregroundColor(.primary)
@@ -81,7 +111,9 @@ struct ManageSubscriptionView: View {
                     
                 } else if currentPlan == .avidReader {
                     Button(action: {
-                        // Setup Downgrade queue
+                        if let window = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                            Task { try? await Purchases.shared.showManageSubscriptions(in: window) }
+                        }
                     }) {
                         VStack(alignment: .leading) {
                             Text("Downgrade to Reader").foregroundColor(.blue)
@@ -92,7 +124,9 @@ struct ManageSubscriptionView: View {
                     }
                     
                     Button(action: {
-                        // Cancel intent handler
+                        if let window = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                            Task { try? await Purchases.shared.showManageSubscriptions(in: window) }
+                        }
                     }) {
                         VStack(alignment: .leading) {
                             Text("Cancel Subscription").foregroundColor(.primary)

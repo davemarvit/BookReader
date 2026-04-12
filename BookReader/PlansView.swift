@@ -1,4 +1,5 @@
 import SwiftUI
+import RevenueCat
 
 struct PlansView: View {
     @EnvironmentObject var audioController: AudioController
@@ -160,7 +161,35 @@ struct PlansView: View {
             if isUpgrade {
                 let ctaText = "Upgrade"
                 Button(action: {
-                    // Route to purchase logic for planType.displayName
+                    let packageIdentifier: String?
+                    if planType == .avidReader {
+                        packageIdentifier = "avid_reader_monthly"
+                    } else if planType == .reader {
+                        packageIdentifier = "reader_monthly"
+                    } else {
+                        packageIdentifier = nil
+                    }
+                    
+                    guard let packageIdentifier = packageIdentifier else { return }
+                    
+                    Task {
+                        do {
+                            print("Looking up package: \(packageIdentifier)")
+                            let offerings = try await Purchases.shared.offerings()
+                            guard let package = offerings.current?.availablePackages.first(where: { $0.identifier == packageIdentifier }) else {
+                                print("Package lookup failure")
+                                return
+                            }
+                            print("Purchasing package: \(packageIdentifier)")
+                            let result = try await Purchases.shared.purchase(package: package)
+                            print("Purchase success")
+                            await MainActor.run {
+                                audioController.entitlementManager.refreshFromRevenueCat(customerInfo: result.customerInfo)
+                            }
+                        } catch {
+                            print("Purchase failure: \(error.localizedDescription)")
+                        }
+                    }
                 }) {
                     Text(ctaText)
                         .font(.headline)

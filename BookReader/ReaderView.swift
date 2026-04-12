@@ -346,6 +346,11 @@ struct ReaderView: View {
                     
                     Button("Upgrade") {
                         audioController.gateController.resolvePendingGate(with: .cancel)
+                        SettingsManager.shared.activeRoute = nil
+                        onOpenSettings?()
+                        DispatchQueue.main.async {
+                            SettingsManager.shared.activeRoute = .plans
+                        }
                     }
                     .buttonStyle(.bordered)
                 }

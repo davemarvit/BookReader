@@ -1,18 +1,36 @@
-// EntitlementManager.swift
-
 import Foundation
 import Combine
+import RevenueCat
 
 /// Runtime source of truth governing premium TTS playback permissions and explicit user gating.
 final class EntitlementManager: ObservableObject {
     // TODO: Temporary client-side placeholder plan model.
-    // Backend authority and real StoreKit-backed tier mapping will come later.
+    // RevenueCat-backed tier mapping is now used to resolve currentPlan,
+    // but quota enforcement is still local until backend authority is added.
     @Published var currentPlan: Plan = .reader
 
     @Published var premiumEntitlement: PremiumEntitlementState = .requiresDecision
     @Published var lastResolvedSessionChoice: PlaybackGateChoice? = nil
     @Published var lastGateReason: String? = nil
     @Published var monthlyPremiumMinutesUsed: Double = 0
+
+    /// Pulls the active tier from RevenueCat customer info.
+    func refreshFromRevenueCat(customerInfo: CustomerInfo) {
+        let hasAvid = customerInfo.entitlements["avid_reader"]?.isActive == true
+        let hasReader = customerInfo.entitlements["reader"]?.isActive == true
+
+        if hasAvid {
+            currentPlan = .avidReader
+            premiumEntitlement = .allowed
+        } else if hasReader {
+            currentPlan = .reader
+            premiumEntitlement = .allowed
+        } else {
+            currentPlan = .free
+            premiumEntitlement = .requiresDecision
+            lastResolvedSessionChoice = nil
+        }
+    }
 
     /// Determines if a gate interface must be shown before continuing playback in the requested mode.
     func requiresExplicitGate(for requestedMode: VoiceMode) -> Bool {
